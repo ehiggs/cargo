@@ -34,6 +34,7 @@ _cargo()
 	local opt__install="$opt_common $opt_feat $opt_jobs --bin --branch --debug --example --git --list --path --rev --root --tag --vers"
 	local opt__locate_project="$opt_mani -h --help"
 	local opt__login="$opt_common --host"
+	local opt__new="$opt_common --vcs --bin --name --template"
 	local opt__metadata="$opt_common $opt_feat $opt_mani --format-version"
 	local opt__new="$opt_common --vcs --bin --name"
 	local opt__owner="$opt_common -a --add -r --remove -l --list --index --token"

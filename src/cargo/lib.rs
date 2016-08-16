@@ -14,6 +14,7 @@ extern crate git2;
 extern crate glob;
 extern crate libc;
 extern crate libgit2_sys;
+extern crate mustache;
 extern crate num_cpus;
 extern crate regex;
 extern crate rustc_serialize;

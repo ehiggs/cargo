@@ -12,6 +12,7 @@ pub struct Options {
     flag_lib: bool,
     arg_path: String,
     flag_name: Option<String>,
+    flag_template: Option<String>,
     flag_vcs: Option<ops::VersionControl>,
     flag_frozen: bool,
     flag_locked: bool,
@@ -32,6 +33,7 @@ Options:
     --bin               Use a binary (application) template
     --lib               Use a library template
     --name NAME         Set the resulting package name
+    --template <template>  Use a specified template
     -v, --verbose ...   Use verbose output
     -q, --quiet         No output printed to stdout
     --color WHEN        Coloring: auto, always, never
@@ -47,13 +49,14 @@ pub fn execute(options: Options, config: &Config) -> CliResult<Option<()>> {
                           options.flag_frozen,
                           options.flag_locked));
 
-    let Options { flag_bin, flag_lib, arg_path, flag_name, flag_vcs, .. } = options;
+    let Options { flag_bin, flag_lib, arg_path, flag_name, flag_vcs, flag_template, .. } = options;
 
     let opts = ops::NewOptions::new(flag_vcs,
                                     flag_bin,
                                     flag_lib,
                                     &arg_path,
-                                    flag_name.as_ref().map(|s| s.as_ref()));
+                                    flag_name.as_ref().map(|s| s.as_ref()),
+                                    flag_template.as_ref().map(|s| s.as_ref()));
 
     let opts_lib = opts.lib;
     try!(ops::new(opts, config));
