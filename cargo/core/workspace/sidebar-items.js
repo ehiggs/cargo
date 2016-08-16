@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["WorkspaceConfig","Configuration of a workspace in a manifest."]],"struct":[["Workspace","The core abstraction in Cargo for working with a workspace of crates."]]});
