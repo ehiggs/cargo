@@ -1,6 +1,6 @@
 use std::env;
 use std::fs::{self, File, DirEntry, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf, Component};
 use std::collections::BTreeMap;
 use rustc_serialize::{Decodable, Decoder};
@@ -10,8 +10,7 @@ use git2::Repository;
 
 use term::color::BLACK;
 
-use mustache::compile_path;
-use mustache::builder::MapBuilder;
+use handlebars::{Handlebars, Context, no_escape};
 
 use core::Workspace;
 use util::{GitRepo, HgRepo, CargoResult, human, ChainError, internal};
@@ -424,17 +423,17 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
         (None, None, name, None) => name,
     };
 
-    let template_dir = config.template_path();
-    if fs::metadata(&template_dir).is_err() {
-        try!(fs::create_dir(&template_dir));
+    let templates_dir = config.template_path();
+    if fs::metadata(&templates_dir).is_err() {
+        try!(fs::create_dir(&templates_dir));
     }
    // create lib & bin templates if not already present.
-    let lib_template = template_dir.join("lib");
-    let bin_template = template_dir.join("bin");
+    let lib_template = templates_dir.join("lib");
+    let bin_template = templates_dir.join("bin");
     try!(create_bin_template(&bin_template));
     try!(create_lib_template(&lib_template));
 
-    let template = match opts.template {
+    let template_dir = match opts.template {
         // given template is a remote git repository & needs to be cloned
         // This will be cloned to .cargo/templates/<repo_name> where <repo_name>
         // is the last component of the given URL. For example:
@@ -452,9 +451,9 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
                         "Could not determine repository name from: {}", path.display())))
                 }
             };
-            let template_path = template_dir.join(repo_name);
+            let template_dir = templates_dir.join(repo_name);
 
-            match Repository::clone(template, &*template_path) {
+            match Repository::clone(template, &*template_dir) {
                 Ok(_) => {},
                 Err(e) => {
                     return Err(human(format!(
@@ -462,12 +461,12 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
                 }
             };
 
-            template_path
+            template_dir
         }
 
         // given template is assumed to already be present on the users system
         // in .cargo/templates/<name>.
-        Some(template) => { template_dir.join(template) }
+        Some(template_name) => { templates_dir.join(template_name) }
 
         // no template given, use either "lib" or "bin" templates depending on the
         // presence of the --bin flag.
@@ -475,51 +474,53 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
     };
 
     // make sure that the template exists
-    if fs::metadata(&template).is_err() {
-        return Err(human(format!("Template `{}` not found", template.display())))
+    if fs::metadata(&template_dir).is_err() {
+        return Err(human(format!("Template `{}` not found", template_dir.display())))
     }
 
     // contruct the mapping used to populate the template
     // if in the future we want to make more varaibles available in
     // the templates, this would be the place to do it.
-    let data = MapBuilder::new()
-        .insert_str("name", name)
-        .insert_str("authors", toml::Value::String(author))
-        .build();
+    let mut handlebars = Handlebars::new();
+    // We don't want html escaping...
+    handlebars.register_escape_fn(no_escape);
+
+    let mut data = BTreeMap::new();
+    data.insert("name".to_owned(), name.to_owned());
+    let author_value = toml::Value::String(author).as_str().unwrap_or("").to_owned();
+    data.insert("authors".to_owned(), author_value);
 
 
-    // For every file found inside the given template directory, compile it as a mustache
+    // For every file found inside the given template directory, compile it as a handlebars 
     // template and render it with the above data to a new file inside the target directory
-    try!(walk_template_dir(&template, &mut |entry| {
+    try!(walk_template_dir(&template_dir, &mut |entry| {
         let path = entry.path();
         let entry_str = path.to_str().unwrap();
-        let template_str = template.to_str().unwrap();
+        let template_dir_str = template_dir.to_str().unwrap();
 
         // the path we have here is the absolute path to the file in the template directory
         // we need to trim this down to be just the path from the root of the template.
         // For example:
         //    /home/user/.cargo/templates/foo/Cargo.toml => Cargo.toml
         //    /home/user/.cargo/templates/foo/src/main.rs => src/main.rs
-        let mut file_name = entry_str.replace(template_str, "");
-        if file_name.starts_with("/") {
-            file_name.remove(0);
+        let mut dest_file_name = entry_str.replace(template_dir_str, "");
+        if dest_file_name.starts_with("/") {
+            dest_file_name.remove(0);
         }
 
-        let template = match compile_path(&path) {
-            Ok(template) => template,
-            Err(e) => panic!("Problem generating template {} - {:?}", path.display(), e)
-        };
-        let mut new_path = PathBuf::from(name).join(file_name);
+        let mut template_str = String::new();
+        File::open(&path).unwrap().read_to_string(&mut template_str).unwrap();
+        let mut dest_path = PathBuf::from(name).join(dest_file_name);
 
-        // file_name could now refer to a file inside a directory which doesn't yet exist
-        // to figure out if this is the case, get all the components in the file_name and check
+        // dest_file_name could now refer to a file inside a directory which doesn't yet exist
+        // to figure out if this is the case, get all the components in the dest_file_name and check
         // how many there are. Files in the root of the new project direcotory will have two
         // components, anything more than that means the file is in a sub-directory, so we need
         // to create it.
         {
-            let components  = new_path.components().collect::<Vec<_>>();
+            let components  = dest_path.components().collect::<Vec<_>>();
             if components.len() > 2 {
-                if let Some(p) = new_path.parent() {
+                if let Some(p) = dest_path.parent() {
                     if fs::metadata(&p).is_err() {
                         let _ = fs::create_dir_all(&p);
                     }
@@ -527,17 +528,17 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
             }
         }
 
-        // if the template file has the ".mustache" extension, remove that to get the correct
+        // if the template file has the ".hbs" extension, remove that to get the correct
         // name for the generated file
-        if let Some(ext) = new_path.clone().extension() {
-            if ext.to_str().unwrap() == "mustache" {
-                new_path.set_extension("");
+        if let Some(ext) = dest_path.clone().extension() {
+            if ext.to_str().unwrap() == "hbs" {
+                dest_path.set_extension("");
             }
         }
 
         // create the new file & render the template to it
-        let mut file = OpenOptions::new().write(true).create(true).open(&new_path).unwrap();
-        template.render_data(&mut file, &data);
+        let mut dest_file = OpenOptions::new().write(true).create(true).open(&dest_path).unwrap();
+        handlebars.template_renderw(&template_str, &Context::wraps(&data), &mut dest_file).ok();
     }));
 
     if let Err(e) = Workspace::new(&path.join("Cargo.toml"), config) {
@@ -666,7 +667,7 @@ fn create_generic_template(path: &PathBuf) -> CargoResult<()> {
 [package]
 name = \"{{name}}\"
 version = \"0.1.0\"
-authors = [{{{authors}}}]
+authors = [\"{{authors}}\"]
 "));
     Ok(())
 }
