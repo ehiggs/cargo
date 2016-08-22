@@ -440,20 +440,26 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
         //
         //      http://github.com/rust-lang/some-template
         //      <repo_name> = some-template
-        Some(template) if template.starts_with("http") ||
-                          template.starts_with("git@") => {
-            let path = PathBuf::from(template);
+        Some(template_url) if template_url.starts_with("http") ||
+                          template_url.starts_with("git@") => {
+            let path = PathBuf::from(template_url);
 
-            let repo_name = match path.components().last().unwrap() {
+            let url_parse_error_msg = format!("Could not determine repository name from: {}", 
+                                              path.display());
+            let potential_repo_name = try!(path.components().last().chain_error(|| {
+                human(url_parse_error_msg.clone())
+            }));
+
+            let repo_name = match potential_repo_name {
                 Component::Normal(p) => p,
                 _ => {
-                    return Err(human(format!(
-                        "Could not determine repository name from: {}", path.display())))
+                    return Err(human(url_parse_error_msg.clone()));
                 }
             };
             let template_dir = templates_dir.join(repo_name);
 
-            match Repository::clone(template, &*template_dir) {
+            try!(config.shell().status("Cloning", template_url));
+            match Repository::clone(template_url, &*template_dir) {
                 Ok(_) => {},
                 Err(e) => {
                     return Err(human(format!(
