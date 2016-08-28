@@ -6,15 +6,16 @@ use std::collections::BTreeMap;
 use rustc_serialize::{Decodable, Decoder};
 
 use git2::Config as GitConfig;
-use git2::Repository;
 
 use term::color::BLACK;
 
 use handlebars::{Handlebars, Context, no_escape};
+use url::Url;
 
 use core::Workspace;
 use util::{GitRepo, HgRepo, CargoResult, human, ChainError, internal};
 use util::{Config, paths};
+use sources::git::GitRemote;
 
 
 use toml;
@@ -440,9 +441,12 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
         //
         //      http://github.com/rust-lang/some-template
         //      <repo_name> = some-template
-        Some(template_url) if template_url.starts_with("http") ||
-                          template_url.starts_with("git@") => {
+        Some(template_url) if template_url.starts_with("git@") => {
+            return Err(human("Remote templates using git/ssh protocol is not supported."))
+        },
+        Some(template_url) if template_url.starts_with("http") => {
             let path = PathBuf::from(template_url);
+            let url = Url::parse(template_url).unwrap();
 
             let url_parse_error_msg = format!("Could not determine repository name from: {}", 
                                               path.display());
@@ -459,14 +463,11 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
             let template_dir = templates_dir.join(repo_name);
 
             try!(config.shell().status("Cloning", template_url));
-            match Repository::clone(template_url, &*template_dir) {
-                Ok(_) => {},
-                Err(e) => {
-                    return Err(human(format!(
-                        "Failed to clone repository: {} - {}", path.display(), e)))
-                }
-            };
-
+            let remote_repo = GitRemote::new(&url);
+            try!(remote_repo.checkout(&template_dir, config).chain_error(|| {
+                human(format!("Could not check out repository: {} to {}", 
+                              template_url, template_dir.display()))
+            }));
             template_dir
         }
 
