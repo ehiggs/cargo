@@ -1,21 +1,21 @@
 use std::env;
 use std::fs::{self, File, DirEntry, OpenOptions};
 use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf, Component};
+use std::path::{Path, PathBuf};
 use std::collections::BTreeMap;
 use rustc_serialize::{Decodable, Decoder};
 
 use git2::Config as GitConfig;
+use git2::Repository;
 
 use term::color::BLACK;
 
 use handlebars::{Handlebars, Context, no_escape};
-use url::Url;
+use tempdir::TempDir;
 
 use core::Workspace;
 use util::{GitRepo, HgRepo, CargoResult, human, ChainError, internal};
 use util::{Config, paths};
-use sources::git::GitRemote;
 
 
 use toml;
@@ -71,7 +71,7 @@ impl<'a> NewOptions<'a> {
         // default to lib
         let is_lib = if !bin {
             true
-        }
+       }
         else {
             lib
         };
@@ -92,6 +92,24 @@ struct CargoNewConfig {
     email: Option<String>,
     version_control: Option<VersionControl>,
 }
+
+// When we manage a template, we either have an existing directory (Normal) or
+// we write the template files to a temporary directory (Temp) and use this
+// location.
+enum TemplateDirectory {
+    Temp(TempDir),
+    Normal(PathBuf)
+}
+
+impl TemplateDirectory {
+    fn path(&self) -> &Path {
+        match *self {
+            TemplateDirectory::Temp(ref tempdir) => tempdir.path(),
+            TemplateDirectory::Normal(ref path) => path.as_path()
+        }
+    }
+}
+
 
 fn get_name<'a>(path: &'a Path, opts: &'a NewOptions, config: &Config) -> CargoResult<&'a str> {
     if let Some(name) = opts.name {
@@ -428,11 +446,7 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
     if fs::metadata(&templates_dir).is_err() {
         try!(fs::create_dir(&templates_dir));
     }
-   // create lib & bin templates if not already present.
-    let lib_template = templates_dir.join("lib");
-    let bin_template = templates_dir.join("bin");
-    try!(create_bin_template(&bin_template));
-    try!(create_lib_template(&lib_template));
+    let templates_dir = templates_dir.as_path();
 
     let template_dir = match opts.template {
         // given template is a remote git repository & needs to be cloned
@@ -445,47 +459,45 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
             return Err(human("Remote templates using git/ssh protocol is not supported."))
         },
         Some(template_url) if template_url.starts_with("http") => {
-            let path = PathBuf::from(template_url);
-            let url = Url::parse(template_url).unwrap();
-
-            let url_parse_error_msg = format!("Could not determine repository name from: {}", 
-                                              path.display());
-            let potential_repo_name = try!(path.components().last().chain_error(|| {
-                human(url_parse_error_msg.clone())
-            }));
-
-            let repo_name = match potential_repo_name {
-                Component::Normal(p) => p,
-                _ => {
-                    return Err(human(url_parse_error_msg.clone()));
-                }
-            };
-            let template_dir = templates_dir.join(repo_name);
+            let template_dir = try!(TempDir::new(name));
+            println!("Checking out repo to dir: {}", template_dir.path().display());
 
             try!(config.shell().status("Cloning", template_url));
-            let remote_repo = GitRemote::new(&url);
-            try!(remote_repo.checkout(&template_dir, config).chain_error(|| {
-                human(format!("Could not check out repository: {} to {}", 
-                              template_url, template_dir.display()))
-            }));
-            template_dir
+            match Repository::clone(template_url, &*template_dir.path()) {
+                Ok(_) => {},
+                Err(e) => {
+                    return Err(human(format!(
+                        "Failed to clone repository: {} - {}", path.display(), e)))
+                }
+            };
+            TemplateDirectory::Temp(template_dir)
         }
 
         // given template is assumed to already be present on the users system
         // in .cargo/templates/<name>.
-        Some(template_name) => { templates_dir.join(template_name) }
-
+        Some(template_name) => {
+            TemplateDirectory::Normal(templates_dir.join(template_name))
+        },
         // no template given, use either "lib" or "bin" templates depending on the
         // presence of the --bin flag.
-        None => { if opts.bin { bin_template } else { lib_template } }
+        None => {
+            let temp_templates_dir = try!(TempDir::new(name));
+            let temp_templates_path = temp_templates_dir.path().to_path_buf();
+            if opts.bin {
+                try!(create_bin_template(&temp_templates_path));
+            } else {
+                try!(create_lib_template(&temp_templates_path));
+            }
+            TemplateDirectory::Temp(temp_templates_dir)
+        }
     };
 
     // make sure that the template exists
-    if fs::metadata(&template_dir).is_err() {
-        return Err(human(format!("Template `{}` not found", template_dir.display())))
+    if fs::metadata(&template_dir.path()).is_err() {
+        return Err(human(format!("Template `{}` not found", template_dir.path().display())))
     }
 
-    // contruct the mapping used to populate the template
+    // construct the mapping used to populate the template
     // if in the future we want to make more varaibles available in
     // the templates, this would be the place to do it.
     let mut handlebars = Handlebars::new();
@@ -497,13 +509,12 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
     let author_value = toml::Value::String(author).as_str().unwrap_or("").to_owned();
     data.insert("authors".to_owned(), author_value);
 
-
-    // For every file found inside the given template directory, compile it as a handlebars 
+    // For every file found inside the given template directory, compile it as a handlebars
     // template and render it with the above data to a new file inside the target directory
-    try!(walk_template_dir(&template_dir, &mut |entry| {
+    try!(walk_template_dir(&template_dir.path(), &mut |entry| {
         let path = entry.path();
         let entry_str = path.to_str().unwrap();
-        let template_dir_str = template_dir.to_str().unwrap();
+        let template_dir_str = template_dir.path().to_str().unwrap();
 
         // the path we have here is the absolute path to the file in the template directory
         // we need to trim this down to be just the path from the root of the template.
@@ -670,23 +681,21 @@ fn create_generic_template(path: &PathBuf) -> CargoResult<()> {
         Ok(_) => {}
         Err(_) => { try!(fs::create_dir(&path.join("src"))); }
     }
-    try!(file(&path.join("Cargo.toml"), b"\
-[package]
-name = \"{{name}}\"
-version = \"0.1.0\"
-authors = [\"{{authors}}\"]
-"));
+    try!(file(&path.join("Cargo.toml"), br#"[package]
+name = "{{name}}"
+version = "0.1.0"
+authors = ["{{authors}}"]
+"#));
     Ok(())
 }
 
 /// Create a new "lib" project
 fn create_lib_template(path: &PathBuf) -> CargoResult<()> {
     try!(create_generic_template(&path));
-    try!(file(&path.join("src/lib.rs"), b"\
-#[test]
+    try!(file(&path.join("src/lib.rs"), br#"#[test]
 fn it_works() {
 }
-"));
+"#));
     Ok(())
 }
 
