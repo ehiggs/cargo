@@ -35,6 +35,8 @@ pub fn package(ws: &Workspace,
         try!(check_metadata(pkg, config));
     }
 
+    try!(verify_dependencies(&pkg));
+
     if opts.list {
         let root = pkg.root();
         let mut list: Vec<_> = try!(src.list_files(&pkg)).iter().map(|file| {
@@ -112,9 +114,23 @@ fn check_metadata(pkg: &Package, config: &Config) -> CargoResult<()> {
         things.push_str(&missing.last().unwrap());
 
         try!(config.shell().warn(
-            &format!("manifest has no {things}. \
+            &format!("manifest has no {things}.\n\
                     See http://doc.crates.io/manifest.html#package-metadata for more info.",
                     things = things)))
+    }
+    Ok(())
+}
+
+// check that the package dependencies are safe to deploy.
+fn verify_dependencies(pkg: &Package) -> CargoResult<()> {
+    for dep in pkg.dependencies() {
+        if dep.source_id().is_path() {
+            if !dep.specified_req() {
+                bail!("all path dependencies must have a version specified \
+                       when packaging.\ndependency `{}` does not specify \
+                       a version.", dep.name())
+            }
+        }
     }
     Ok(())
 }
@@ -157,8 +173,7 @@ fn check_not_dirty(p: &Package, src: &PathSource) -> CargoResult<()> {
             Ok(())
         } else {
             bail!("{} dirty files found in the working directory:\n\n{}\n\n\
-                   to publish despite this, pass `--allow-dirty` to \
-                   `cargo publish`",
+                   to proceed despite this, pass the `--allow-dirty` flag",
                   dirty.len(), dirty.join("\n"))
         }
     }
@@ -275,6 +290,7 @@ fn run_verify(ws: &Workspace, tar: &File, opts: &PackageOpts) -> CargoResult<()>
         target: None,
         features: &[],
         no_default_features: false,
+        all_features: false,
         spec: &[],
         filter: ops::CompileFilter::Everything,
         exec_engine: None,
