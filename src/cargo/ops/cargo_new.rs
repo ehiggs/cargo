@@ -455,10 +455,8 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
         //
         //      http://github.com/rust-lang/some-template
         //      <repo_name> = some-template
-        Some(template_url) if template_url.starts_with("git@") => {
-            return Err(human("Remote templates using git/ssh protocol is not supported."))
-        },
-        Some(template_url) if template_url.starts_with("http") => {
+        Some(template_url) if template_url.starts_with("http") ||
+                              template_url.starts_with("git@") => {
             let template_dir = try!(TempDir::new(name));
             println!("Checking out repo to dir: {}", template_dir.path().display());
 
@@ -512,8 +510,8 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
     // For every file found inside the given template directory, compile it as a handlebars
     // template and render it with the above data to a new file inside the target directory
     try!(walk_template_dir(&template_dir.path(), &mut |entry| {
-        let path = entry.path();
-        let entry_str = path.to_str().unwrap();
+        let entry_path = entry.path();
+        let entry_str = entry_path.to_str().unwrap();
         let template_dir_str = template_dir.path().to_str().unwrap();
 
         // the path we have here is the absolute path to the file in the template directory
@@ -527,8 +525,8 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
         }
 
         let mut template_str = String::new();
-        File::open(&path).unwrap().read_to_string(&mut template_str).unwrap();
-        let mut dest_path = PathBuf::from(name).join(dest_file_name);
+        File::open(&entry_path).unwrap().read_to_string(&mut template_str).unwrap();
+        let mut dest_path = PathBuf::from(path).join(dest_file_name);
 
         // dest_file_name could now refer to a file inside a directory which doesn't yet exist
         // to figure out if this is the case, get all the components in the dest_file_name and check
