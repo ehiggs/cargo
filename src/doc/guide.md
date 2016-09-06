@@ -413,7 +413,7 @@ information.
 
 # Templates
 
-Cargo uses the mustache library to compile the templates used to scaffold
+Cargo uses the handlebars library to compile the templates used to scaffold
 projects. By default, there are only two templates available, `bin` and `lib`.
 These are used by cargo to create the standard project structure.
 
@@ -423,7 +423,7 @@ have downloaded on your system, or a URL to a remote Git repository containing
 the project template.
 
 ```
-# use the mytemplate template which is located in .cargo/templates/mytemplate
+# use the mytemplate template which is located in ~/.cargo/templates/mytemplate
 $ cargo new myproj --template mytemplate
 
 # download the template called mytemplate from your github package
@@ -434,9 +434,10 @@ $ cargo new myproj --template http://github.com/you/mytemplate
 
 A cargo template is just a folder containing one or more files. Usually, there
 is a `Cargo.toml` and a `src` directory. Each file in the template directory
-will be treated as a mustache template. This means you can use mustache
+will be treated as a handlebars template. This means you can use handlebars
 variables wherever you want dynamic content, and cargo will render the proper
-values. Let's create a simple example. Create a new folder called `mytemplate`.
+values. Let's create a simple example. Create a new folder called `mytemplate`
+in your `~/.cargo/templates` directory..
 Add the following files:
 
 ```toml
