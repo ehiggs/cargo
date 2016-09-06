@@ -544,6 +544,11 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
             }
         }
 
+        // if we are running init, we do not clobber existing files.
+        if fs::metadata(&dest_path).is_ok() {
+            return;
+        }
+
         // if the template file has the ".hbs" extension, remove that to get the correct
         // name for the generated file
         if let Some(ext) = dest_path.clone().extension() {
