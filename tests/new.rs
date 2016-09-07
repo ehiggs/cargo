@@ -56,6 +56,41 @@ fn simple_bin() {
 }
 
 #[test]
+fn simple_template() {
+    let root = paths::root();
+    fs::create_dir_all(&root.join("home/.cargo/templates/testtemplate/src")).unwrap();
+    File::create(&root.join("home/.cargo/templates/testtemplate/Cargo.toml"))
+                      .unwrap().write_all(br#"[package]
+name = "{{name}}"
+version = "0.0.1"
+authors = [{{authors}}]
+"#).unwrap();
+    File::create(&root.join("home/.cargo/templates/testtemplate/src/main.rs"))
+                      .unwrap().write_all(br#"
+fn main () {
+  println!("hello {{name}}");
+}
+    "#).unwrap();
+
+    assert_that(cargo_process("new").arg("--template").arg("testtemplate")
+                                    .arg("foo")
+                                    .env("USER", "foo"),
+                execs().with_status(0).with_stderr("\
+[CREATED] library `foo` project
+"));
+
+    assert_that(&paths::root().join("foo"), existing_dir());
+    assert_that(&paths::root().join("foo/Cargo.toml"), existing_file());
+    assert_that(&paths::root().join("foo/src/main.rs"), existing_file());
+
+    assert_that(cargo_process("build").cwd(&paths::root().join("foo")),
+                execs().with_status(0));
+    assert_that(&paths::root().join(&format!("foo/target/debug/foo{}",
+                                             env::consts::EXE_SUFFIX)),
+                existing_file());
+}
+
+#[test]
 fn both_lib_and_bin() {
     let td = TempDir::new("cargo").unwrap();
     assert_that(cargo_process("new").arg("--lib").arg("--bin").arg("foo").cwd(td.path().clone())

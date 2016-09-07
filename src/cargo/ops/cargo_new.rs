@@ -430,7 +430,6 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
             try!(fs::create_dir_all(path));
         },
     };
-
     let (author_name, email) = try!(discover_author());
     // Hoo boy, sure glad we've got exhaustivenes checking behind us.
     let author = match (cfg.name, cfg.email, author_name, email) {
@@ -444,7 +443,7 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
 
     let templates_dir = config.template_path();
     if fs::metadata(&templates_dir).is_err() {
-        try!(fs::create_dir(&templates_dir));
+        try!(fs::create_dir_all(&templates_dir));
     }
     let templates_dir = templates_dir.as_path();
 
@@ -504,7 +503,7 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
 
     let mut data = BTreeMap::new();
     data.insert("name".to_owned(), name.to_owned());
-    let author_value = toml::Value::String(author).as_str().unwrap_or("").to_owned();
+    let author_value = format!("{}", toml::Value::String(author));
     data.insert("authors".to_owned(), author_value);
 
     // For every file found inside the given template directory, compile it as a handlebars
@@ -687,7 +686,7 @@ fn create_generic_template(path: &PathBuf) -> CargoResult<()> {
     try!(file(&path.join("Cargo.toml"), br#"[package]
 name = "{{name}}"
 version = "0.1.0"
-authors = ["{{authors}}"]
+authors = [{{authors}}]
 "#));
     Ok(())
 }
