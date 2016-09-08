@@ -1,7 +1,7 @@
 use std::env;
 use std::fs::{self, File, DirEntry, OpenOptions};
 use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Path, PathBuf, MAIN_SEPARATOR};
 use std::collections::BTreeMap;
 use rustc_serialize::{Decodable, Decoder};
 
@@ -518,8 +518,9 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
         // For example:
         //    /home/user/.cargo/templates/foo/Cargo.toml => Cargo.toml
         //    /home/user/.cargo/templates/foo/src/main.rs => src/main.rs
+        //    C:\user\.cargo\templates\foo\src\main.rs => src/main.rs
         let mut dest_file_name = entry_str.replace(template_dir_str, "");
-        if dest_file_name.starts_with("/") {
+        if dest_file_name.starts_with(MAIN_SEPARATOR) {
             dest_file_name.remove(0);
         }
 
