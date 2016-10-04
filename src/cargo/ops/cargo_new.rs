@@ -110,6 +110,61 @@ impl TemplateDirectory {
     }
 }
 
+fn get_input_template(config: &Config, opts: &MkOptions) -> CargoResult<TemplateDirectory> {
+    let path = opts.path;
+    let name = opts.name;
+    let templates_dir = config.template_path();
+    if fs::metadata(&templates_dir).is_err() {
+        try!(fs::create_dir_all(&templates_dir));
+    }
+    let templates_dir = templates_dir.as_path();
+
+    let template_dir = match opts.template {
+        // given template is a remote git repository & needs to be cloned
+        // This will be cloned to .cargo/templates/<repo_name> where <repo_name>
+        // is the last component of the given URL. For example:
+        //
+        //      http://github.com/rust-lang/some-template
+        //      <repo_name> = some-template
+        Some(template_url) if template_url.starts_with("http://")  ||
+            template_url.starts_with("https://") ||
+            template_url.starts_with("file://")  || 
+            template_url.starts_with("git@") => {
+                let template_dir = try!(TempDir::new(name));
+                println!("Checking out repo to dir: {}", template_dir.path().display());
+
+                try!(config.shell().status("Cloning", template_url));
+                match Repository::clone(template_url, &*template_dir.path()) {
+                    Ok(_) => {},
+                    Err(e) => {
+                        return Err(human(format!(
+                                    "Failed to clone repository: {} - {}", path.display(), e)))
+                    }
+                };
+                TemplateDirectory::Temp(template_dir)
+            }
+
+        // given template is assumed to already be present on the users system
+        // in .cargo/templates/<name>.
+        Some(template_name) => {
+            TemplateDirectory::Normal(templates_dir.join(template_name))
+        },
+        // no template given, use either "lib" or "bin" templates depending on the
+        // presence of the --bin flag.
+        None => {
+            let temp_templates_dir = try!(TempDir::new(name));
+            let temp_templates_path = temp_templates_dir.path().to_path_buf();
+            if opts.bin {
+                try!(create_bin_template(&temp_templates_path));
+            } else {
+                try!(create_lib_template(&temp_templates_path));
+            }
+            TemplateDirectory::Temp(temp_templates_dir)
+        }
+    };
+    Ok(template_dir)
+}
+
 
 fn get_name<'a>(path: &'a Path, opts: &'a NewOptions, config: &Config) -> CargoResult<&'a str> {
     if let Some(name) = opts.name {
@@ -432,7 +487,7 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
     };
     let (author_name, email) = try!(discover_author());
     // Hoo boy, sure glad we've got exhaustivenes checking behind us.
-    let author = match (cfg.name, cfg.email, author_name, email) {
+    let author = match (cfg.name.clone(), cfg.email.clone(), author_name, email) {
         (Some(name), Some(email), _, _) |
         (Some(name), None, _, Some(email)) |
         (None, Some(email), name, _) |
@@ -441,53 +496,7 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
         (None, None, name, None) => name,
     };
 
-    let templates_dir = config.template_path();
-    if fs::metadata(&templates_dir).is_err() {
-        try!(fs::create_dir_all(&templates_dir));
-    }
-    let templates_dir = templates_dir.as_path();
-
-    let template_dir = match opts.template {
-        // given template is a remote git repository & needs to be cloned
-        // This will be cloned to .cargo/templates/<repo_name> where <repo_name>
-        // is the last component of the given URL. For example:
-        //
-        //      http://github.com/rust-lang/some-template
-        //      <repo_name> = some-template
-        Some(template_url) if template_url.starts_with("http") ||
-                              template_url.starts_with("git@") => {
-            let template_dir = try!(TempDir::new(name));
-            println!("Checking out repo to dir: {}", template_dir.path().display());
-
-            try!(config.shell().status("Cloning", template_url));
-            match Repository::clone(template_url, &*template_dir.path()) {
-                Ok(_) => {},
-                Err(e) => {
-                    return Err(human(format!(
-                        "Failed to clone repository: {} - {}", path.display(), e)))
-                }
-            };
-            TemplateDirectory::Temp(template_dir)
-        }
-
-        // given template is assumed to already be present on the users system
-        // in .cargo/templates/<name>.
-        Some(template_name) => {
-            TemplateDirectory::Normal(templates_dir.join(template_name))
-        },
-        // no template given, use either "lib" or "bin" templates depending on the
-        // presence of the --bin flag.
-        None => {
-            let temp_templates_dir = try!(TempDir::new(name));
-            let temp_templates_path = temp_templates_dir.path().to_path_buf();
-            if opts.bin {
-                try!(create_bin_template(&temp_templates_path));
-            } else {
-                try!(create_lib_template(&temp_templates_path));
-            }
-            TemplateDirectory::Temp(temp_templates_dir)
-        }
-    };
+    let template_dir = try!(get_input_template(config, opts));
 
     // make sure that the template exists
     if fs::metadata(&template_dir.path()).is_err() {
@@ -622,6 +631,7 @@ fn global_config(config: &Config) -> CargoResult<CargoNewConfig> {
         }
         None => None
     };
+
     Ok(CargoNewConfig {
         name: name,
         email: email,

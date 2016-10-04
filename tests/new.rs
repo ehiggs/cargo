@@ -9,7 +9,7 @@ use std::env;
 
 use cargo::util::ProcessBuilder;
 use cargotest::process;
-use cargotest::support::{execs, paths};
+use cargotest::support::{execs, git, paths, project};
 use hamcrest::{assert_that, existing_file, existing_dir, is_not};
 use tempdir::TempDir;
 
@@ -78,6 +78,39 @@ fn main () {
                 execs().with_status(0).with_stderr("\
 [CREATED] library `foo` project
 "));
+
+    assert_that(&paths::root().join("foo"), existing_dir());
+    assert_that(&paths::root().join("foo/Cargo.toml"), existing_file());
+    assert_that(&paths::root().join("foo/src/main.rs"), existing_file());
+
+    assert_that(cargo_process("build").cwd(&paths::root().join("foo")),
+                execs().with_status(0));
+    assert_that(&paths::root().join(&format!("foo/target/debug/foo{}",
+                                             env::consts::EXE_SUFFIX)),
+                existing_file());
+}
+
+#[test]
+fn git_template() {
+    let project = project("foo");
+    let git_project = git::new("template1", |project| {
+        project
+            .file("Cargo.toml", r#"[package]
+name = "{{name}}"
+version = "0.0.1"
+authors = [{{authors}}]
+            "#)
+            .file("src/main.rs", r#"
+                pub fn main() {
+                    println!("hello world");
+                }
+            "#)
+    }).unwrap();
+
+    assert_that(cargo_process("new").arg("--template").arg(git_project.url().as_str())
+                                    .arg("foo")
+                                    .env("USER", "foo"),
+                execs().with_status(0));
 
     assert_that(&paths::root().join("foo"), existing_dir());
     assert_that(&paths::root().join("foo/Cargo.toml"), existing_file());
