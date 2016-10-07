@@ -30,6 +30,7 @@ pub struct NewOptions<'a> {
     pub path: &'a str,
     pub name: Option<&'a str>,
     pub template: Option<&'a str>,
+    pub template_repo: Option<&'a str>,
 }
 
 struct SourceFileInformation {
@@ -41,6 +42,7 @@ struct SourceFileInformation {
 struct MkOptions<'a> {
     version_control: Option<VersionControl>,
     template: Option<&'a str>,
+    template_repo: Option<&'a str>,
     path: &'a Path,
     name: &'a str,
     bin: bool,
@@ -66,7 +68,8 @@ impl<'a> NewOptions<'a> {
            lib: bool,
            path: &'a str,
            name: Option<&'a str>,
-           template: Option<&'a str>) -> NewOptions<'a> {
+           template: Option<&'a str>,
+           template_repo: Option<&'a str>) -> NewOptions<'a> {
 
         // default to lib
         let is_lib = if !bin {
@@ -83,6 +86,7 @@ impl<'a> NewOptions<'a> {
             path: path,
             name: name,
             template: template,
+            template_repo: template_repo,
         }
     }
 }
@@ -93,10 +97,7 @@ struct CargoNewConfig {
     version_control: Option<VersionControl>,
 }
 
-// When we manage a template, we either have an existing directory (Normal) or
-// we write the template files to a temporary directory (Temp) and use this
-// location.
-enum TemplateDirectory {
+enum TemplateDirectory{
     Temp(TempDir),
     Normal(PathBuf)
 }
@@ -117,16 +118,15 @@ fn get_input_template(config: &Config, opts: &MkOptions) -> CargoResult<Template
     if fs::metadata(&templates_dir).is_err() {
         try!(fs::create_dir_all(&templates_dir));
     }
-    let templates_dir = templates_dir.as_path();
 
-    let template_dir = match opts.template {
+    let template_dir = match (opts.template_repo, opts.template) {
         // given template is a remote git repository & needs to be cloned
         // This will be cloned to .cargo/templates/<repo_name> where <repo_name>
         // is the last component of the given URL. For example:
         //
         //      http://github.com/rust-lang/some-template
         //      <repo_name> = some-template
-        Some(template_url) if template_url.starts_with("http://")  ||
+        (Some(template_url), _) if template_url.starts_with("http://")  ||
             template_url.starts_with("https://") ||
             template_url.starts_with("file://")  || 
             template_url.starts_with("git@") => {
@@ -142,16 +142,17 @@ fn get_input_template(config: &Config, opts: &MkOptions) -> CargoResult<Template
                     }
                 };
                 TemplateDirectory::Temp(template_dir)
-            }
+            },
+        (Some(directory), _) => {
+            TemplateDirectory::Normal(PathBuf::from(directory))
 
-        // given template is assumed to already be present on the users system
-        // in .cargo/templates/<name>.
-        Some(template_name) => {
-            TemplateDirectory::Normal(templates_dir.join(template_name))
+        },
+        (None, Some(_)) => {
+            return Err(human("A template was given, but no template repository"));
         },
         // no template given, use either "lib" or "bin" templates depending on the
         // presence of the --bin flag.
-        None => {
+        (None, None) => {
             let temp_templates_dir = try!(TempDir::new(name));
             let temp_templates_path = temp_templates_dir.path().to_path_buf();
             if opts.bin {
@@ -352,6 +353,7 @@ pub fn new(opts: NewOptions, config: &Config) -> CargoResult<()> {
     let mkopts = MkOptions {
         version_control: opts.version_control,
         template: opts.template,
+        template_repo: opts.template_repo,
         path: &path,
         name: name,
         bin: opts.bin,
@@ -418,6 +420,7 @@ pub fn init(opts: NewOptions, config: &Config) -> CargoResult<()> {
     let mkopts = MkOptions {
         version_control: version_control,
         template: opts.template,
+        template_repo: opts.template_repo,
         path: &path,
         name: name,
         bin: src_paths_types.iter().any(|x|x.bin),
@@ -497,10 +500,14 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
     };
 
     let template_dir = try!(get_input_template(config, opts));
+    let template_path = match opts.template {
+        Some(template) => template_dir.path().join(template),
+        None => template_dir.path().to_path_buf()
+    };
 
     // make sure that the template exists
-    if fs::metadata(&template_dir.path()).is_err() {
-        return Err(human(format!("Template `{}` not found", template_dir.path().display())))
+    if fs::metadata(&template_path).is_err() {
+        return Err(human(format!("Template `{}` not found", template_path.display())))
     }
 
     // construct the mapping used to populate the template
@@ -517,10 +524,10 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
 
     // For every file found inside the given template directory, compile it as a handlebars
     // template and render it with the above data to a new file inside the target directory
-    try!(walk_template_dir(&template_dir.path(), &mut |entry| {
+    try!(walk_template_dir(&template_path, &mut |entry| {
         let entry_path = entry.path();
         let entry_str = entry_path.to_str().unwrap();
-        let template_dir_str = template_dir.path().to_str().unwrap();
+        let template_dir_str = template_path.to_str().unwrap();
 
         // the path we have here is the absolute path to the file in the template directory
         // we need to trim this down to be just the path from the root of the template.
