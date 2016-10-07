@@ -109,11 +109,11 @@ pub fn execute(options: Options, config: &Config) -> CliResult<Option<()>> {
         all_features: options.flag_all_features,
         no_default_features: options.flag_no_default_features,
         spec: &[],
-        exec_engine: None,
         mode: ops::CompileMode::Build,
         release: !options.flag_debug,
         filter: ops::CompileFilter::new(false, &options.flag_bin, &[],
                                         &options.flag_example, &[]),
+        message_format: ops::MessageFormat::Human,
         target_rustc_args: None,
         target_rustdoc_args: None,
     };

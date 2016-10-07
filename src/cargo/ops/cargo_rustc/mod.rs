@@ -5,10 +5,12 @@ use std::fs;
 use std::path::{self, PathBuf};
 use std::sync::Arc;
 
+use rustc_serialize::json;
+
 use core::{Package, PackageId, PackageSet, Target, Resolve};
 use core::{Profile, Profiles, Workspace};
 use core::shell::ColorConfig;
-use util::{self, CargoResult, human};
+use util::{self, CargoResult, human, machine_message};
 use util::{Config, internal, ChainError, profile, join_paths, short_hash};
 
 use self::job::{Job, Work};
@@ -16,14 +18,14 @@ use self::job_queue::JobQueue;
 
 pub use self::compilation::Compilation;
 pub use self::context::{Context, Unit};
-pub use self::engine::{CommandPrototype, CommandType, ExecEngine, ProcessEngine};
+pub use self::command::{CommandPrototype, CommandType};
 pub use self::layout::{Layout, LayoutProxy};
 pub use self::custom_build::{BuildOutput, BuildMap, BuildScripts};
 
-mod context;
+mod command;
 mod compilation;
+mod context;
 mod custom_build;
-mod engine;
 mod fingerprint;
 mod job;
 mod job_queue;
@@ -40,10 +42,10 @@ pub struct BuildConfig {
     pub requested_target: Option<String>,
     pub target: TargetConfig,
     pub jobs: u32,
-    pub exec_engine: Option<Arc<Box<ExecEngine>>>,
     pub release: bool,
     pub test: bool,
     pub doc_all: bool,
+    pub json_errors: bool,
 }
 
 #[derive(Clone, Default)]
@@ -159,6 +161,7 @@ pub fn compile_targets<'a, 'cfg: 'a>(ws: &Workspace<'cfg>,
             cx.compilation.native_dirs.insert(dir.clone());
         }
     }
+    cx.compilation.target = cx.target_triple().to_string();
     Ok(cx.compilation)
 }
 
@@ -212,7 +215,6 @@ fn rustc(cx: &mut Context, unit: &Unit) -> CargoResult<Work> {
         }
     }
     let has_custom_args = unit.profile.rustc_args.is_some();
-    let exec_engine = cx.exec_engine.clone();
 
     let filenames = try!(cx.target_filenames(unit));
     let root = cx.out_dir(unit);
@@ -240,7 +242,9 @@ fn rustc(cx: &mut Context, unit: &Unit) -> CargoResult<Work> {
     let cwd = cx.config.cwd().to_path_buf();
 
     rustc.args(&try!(cx.rustflags_args(unit)));
-
+    let json_errors = cx.build_config.json_errors;
+    let package_id = unit.pkg.package_id().clone();
+    let target = unit.target.clone();
     return Ok(Work::new(move |state| {
         // Only at runtime have we discovered what the extra -L and -l
         // arguments are for native libraries, so we process those here. We
@@ -266,7 +270,31 @@ fn rustc(cx: &mut Context, unit: &Unit) -> CargoResult<Work> {
         }
 
         state.running(&rustc);
-        try!(exec_engine.exec(rustc).chain_error(|| {
+        let process_builder = rustc.into_process_builder();
+        try!(if json_errors {
+            process_builder.exec_with_streaming(
+                &mut |line| if !line.is_empty() {
+                    Err(internal(&format!("compiler stdout is not empty: `{}`", line)))
+                } else {
+                    Ok(())
+                },
+                &mut |line| {
+                    let compiler_message = try!(json::Json::from_str(line).map_err(|_| {
+                        internal(&format!("compiler produced invalid json: `{}`", line))
+                    }));
+
+                    machine_message::FromCompiler::new(
+                        &package_id,
+                        &target,
+                        compiler_message
+                    ).emit();
+
+                    Ok(())
+                },
+            ).map(|_| ())
+        } else {
+            process_builder.exec()
+        }.chain_error(|| {
             human(format!("Could not compile `{}`.", name))
         }));
 
@@ -438,7 +466,6 @@ fn rustdoc(cx: &mut Context, unit: &Unit) -> CargoResult<Work> {
     let name = unit.pkg.name().to_string();
     let build_state = cx.build_state.clone();
     let key = (unit.pkg.package_id().clone(), unit.kind);
-    let exec_engine = cx.exec_engine.clone();
 
     Ok(Work::new(move |state| {
         if let Some(output) = build_state.outputs.lock().unwrap().get(&key) {
@@ -447,7 +474,7 @@ fn rustdoc(cx: &mut Context, unit: &Unit) -> CargoResult<Work> {
             }
         }
         state.running(&rustdoc);
-        exec_engine.exec(rustdoc).chain_error(|| {
+        rustdoc.into_process_builder().exec().chain_error(|| {
             human(format!("Could not document `{}`.", name))
         })
     }))
@@ -493,6 +520,10 @@ fn build_base_args(cx: &Context,
     let color_config = cx.config.shell().color_config();
     if color_config != ColorConfig::Auto {
         cmd.arg("--color").arg(&color_config.to_string());
+    }
+
+    if cx.build_config.json_errors {
+        cmd.arg("--error-format").arg("json");
     }
 
     cmd.arg("--crate-name").arg(&unit.target.crate_name());

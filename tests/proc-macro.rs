@@ -6,6 +6,7 @@ use cargotest::support::{project, execs};
 use hamcrest::assert_that;
 
 #[test]
+#[ignore]
 fn noop() {
     if !is_nightly() {
         return;
@@ -22,7 +23,7 @@ fn noop() {
             path = "../noop"
         "#)
         .file("src/main.rs", r#"
-            #![feature(rustc_macro)]
+            #![feature(proc_macro)]
 
             #[macro_use]
             extern crate noop;
@@ -40,15 +41,15 @@ fn noop() {
             authors = []
 
             [lib]
-            rustc-macro = true
+            proc-macro = true
         "#)
         .file("src/lib.rs", r#"
-            #![feature(rustc_macro, rustc_macro_lib)]
+            #![feature(proc_macro, proc_macro_lib)]
 
-            extern crate rustc_macro;
-            use rustc_macro::TokenStream;
+            extern crate proc_macro;
+            use proc_macro::TokenStream;
 
-            #[rustc_macro_derive(Noop)]
+            #[proc_macro_derive(Noop)]
             pub fn noop(input: TokenStream) -> TokenStream {
                 input
             }
@@ -62,6 +63,7 @@ fn noop() {
 }
 
 #[test]
+#[ignore]
 fn impl_and_derive() {
     if !is_nightly() {
         return;
@@ -78,7 +80,7 @@ fn impl_and_derive() {
             path = "../transmogrify"
         "#)
         .file("src/main.rs", r#"
-            #![feature(rustc_macro)]
+            #![feature(proc_macro)]
 
             #[macro_use]
             extern crate transmogrify;
@@ -104,15 +106,15 @@ fn impl_and_derive() {
             authors = []
 
             [lib]
-            rustc-macro = true
+            proc-macro = true
         "#)
         .file("src/lib.rs", r#"
-            #![feature(rustc_macro, rustc_macro_lib)]
+            #![feature(proc_macro, proc_macro_lib)]
 
-            extern crate rustc_macro;
-            use rustc_macro::TokenStream;
+            extern crate proc_macro;
+            use proc_macro::TokenStream;
 
-            #[rustc_macro_derive(Transmogrify)]
+            #[proc_macro_derive(Transmogrify)]
             #[doc(hidden)]
             pub fn transmogrify(input: TokenStream) -> TokenStream {
                 assert_eq!(input.to_string(), "struct X;\n");
@@ -146,7 +148,8 @@ fn impl_and_derive() {
 }
 
 #[test]
-fn plugin_and_rustc_macro() {
+#[ignore]
+fn plugin_and_proc_macro() {
     if !is_nightly() {
         return;
     }
@@ -160,28 +163,28 @@ fn plugin_and_rustc_macro() {
 
             [lib]
             plugin = true
-            rustc-macro = true
+            proc-macro = true
         "#)
         .file("src/lib.rs", r#"
             #![feature(plugin_registrar, rustc_private)]
-            #![feature(rustc_macro, rustc_macro_lib)]
+            #![feature(proc_macro, proc_macro_lib)]
 
             extern crate rustc_plugin;
             use rustc_plugin::Registry;
 
-            extern crate rustc_macro;
-            use rustc_macro::TokenStream;
+            extern crate proc_macro;
+            use proc_macro::TokenStream;
 
             #[plugin_registrar]
             pub fn plugin_registrar(reg: &mut Registry) {}
 
-            #[rustc_macro_derive(Questionable)]
+            #[proc_macro_derive(Questionable)]
             pub fn questionable(input: TokenStream) -> TokenStream {
                 input
             }
         "#);
 
-    let msg = "  lib.plugin and lib.rustc-macro cannot both be true";
+    let msg = "  lib.plugin and lib.proc-macro cannot both be true";
     assert_that(questionable.cargo_process("build"),
                 execs().with_status(101).with_stderr_contains(msg));
 }

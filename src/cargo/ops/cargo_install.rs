@@ -90,7 +90,10 @@ pub fn install(root: Option<&str>,
         Some(Filesystem::new(config.cwd().join("target-install")))
     };
 
-    let ws = try!(Workspace::one(pkg, config, overidden_target_dir));
+    let ws = match overidden_target_dir {
+        Some(dir) => try!(Workspace::one(pkg, config, Some(dir))),
+        None => try!(Workspace::new(pkg.manifest_path(), config)),
+    };
     let pkg = try!(ws.current());
 
     // Preflight checks to check up front whether we'll overwrite something.
@@ -255,7 +258,7 @@ fn select_pkg<'a, T>(mut source: T,
     try!(source.update());
     match name {
         Some(name) => {
-            let dep = try!(Dependency::parse(name, vers, source_id));
+            let dep = try!(Dependency::parse_no_deprecated(name, vers, source_id));
             let deps = try!(source.query(&dep));
             match deps.iter().map(|p| p.package_id()).max() {
                 Some(pkgid) => {

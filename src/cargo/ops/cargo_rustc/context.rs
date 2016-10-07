@@ -16,7 +16,6 @@ use super::fingerprint::Fingerprint;
 use super::layout::{Layout, LayoutProxy};
 use super::links::Links;
 use super::{Kind, Compilation, BuildConfig};
-use super::{ProcessEngine, ExecEngine};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub struct Unit<'a> {
@@ -34,7 +33,6 @@ pub struct Context<'a, 'cfg: 'a> {
     pub packages: &'a PackageSet<'cfg>,
     pub build_state: Arc<BuildState>,
     pub build_explicit_deps: HashMap<Unit<'a>, (PathBuf, Vec<String>)>,
-    pub exec_engine: Arc<Box<ExecEngine>>,
     pub fingerprints: HashMap<Unit<'a>, Arc<Fingerprint>>,
     pub compiled: HashSet<Unit<'a>>,
     pub build_config: BuildConfig,
@@ -72,9 +70,6 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
             None => None,
         };
 
-        let engine = build_config.exec_engine.as_ref().cloned().unwrap_or({
-            Arc::new(Box::new(ProcessEngine))
-        });
         let current_package = try!(ws.current()).package_id().clone();
         Ok(Context {
             host: host_layout,
@@ -88,7 +83,6 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
             compilation: Compilation::new(config),
             build_state: Arc::new(BuildState::new(&build_config)),
             build_config: build_config,
-            exec_engine: engine,
             fingerprints: HashMap::new(),
             profiles: profiles,
             compiled: HashSet::new(),
@@ -775,8 +769,16 @@ fn env_args(config: &Config,
         return Ok(args.collect());
     }
 
-    // Then the build.rustflags value
     let name = name.chars().flat_map(|c| c.to_lowercase()).collect::<String>();
+    // Then the target.*.rustflags value
+    let target = build_config.requested_target.as_ref().unwrap_or(&build_config.host_triple);
+    let key = format!("target.{}.{}", target, name);
+    if let Some(args) = try!(config.get_list(&key)) {
+        let args = args.val.into_iter().map(|a| a.0);
+        return Ok(args.collect());
+    }
+
+    // Then the build.rustflags value
     let key = format!("build.{}", name);
     if let Some(args) = try!(config.get_list(&key)) {
         let args = args.val.into_iter().map(|a| a.0);
