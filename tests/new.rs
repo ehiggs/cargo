@@ -9,7 +9,7 @@ use std::env;
 
 use cargo::util::ProcessBuilder;
 use cargotest::process;
-use cargotest::support::{execs, git, paths, project};
+use cargotest::support::{execs, git, paths};
 use hamcrest::{assert_that, existing_file, existing_dir, is_not};
 use tempdir::TempDir;
 
@@ -73,7 +73,8 @@ fn main () {
     "#).unwrap();
 
     assert_that(cargo_process("new").arg("--template").arg("testtemplate")
-                                    .arg("--template-repo").arg(&root.join("home/.cargo/templates/"))
+                                    .arg("--template-repo")
+                                    .arg(&root.join("home/.cargo/templates/"))
                                     .arg("foo")
                                     .env("USER", "foo"),
                 execs().with_status(0).with_stderr("\
@@ -93,7 +94,6 @@ fn main () {
 
 #[test]
 fn git_template() {
-    let project = project("foo");
     let git_project = git::new("template1", |project| {
         project
             .file("Cargo.toml", r#"[package]

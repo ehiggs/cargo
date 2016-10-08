@@ -51,7 +51,13 @@ pub fn execute(options: Options, config: &Config) -> CliResult<Option<()>> {
                           options.flag_frozen,
                           options.flag_locked));
 
-    let Options { flag_bin, flag_lib, arg_path, flag_name, flag_vcs, flag_template, flag_template_repo, .. } = options;
+    let Options { 
+        flag_bin, flag_lib, 
+        arg_path, flag_name, 
+        flag_vcs, 
+        flag_template, flag_template_repo, 
+        .. 
+    } = options;
 
     let tmp = &arg_path.unwrap_or(format!("."));
     let opts = ops::NewOptions::new(flag_vcs,
