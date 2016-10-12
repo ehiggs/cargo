@@ -121,11 +121,6 @@ fn get_input_template(config: &Config, opts: &MkOptions) -> CargoResult<Template
 
     let template_dir = match (opts.template_repo, opts.template) {
         // given template is a remote git repository & needs to be cloned
-        // This will be cloned to .cargo/templates/<repo_name> where <repo_name>
-        // is the last component of the given URL. For example:
-        //
-        //      http://github.com/rust-lang/some-template
-        //      <repo_name> = some-template
         (Some(template_url), _) if template_url.starts_with("http://")  ||
             template_url.starts_with("https://") ||
             template_url.starts_with("file://")  || 
@@ -143,6 +138,7 @@ fn get_input_template(config: &Config, opts: &MkOptions) -> CargoResult<Template
                 };
                 TemplateDirectory::Temp(template_dir)
             },
+        // given template is a local directory
         (Some(directory), _) => {
             TemplateDirectory::Normal(PathBuf::from(directory))
 
