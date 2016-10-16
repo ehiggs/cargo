@@ -119,7 +119,9 @@ enum TemplateType<'a>  {
     Builtin
 }
 
-fn get_template_type<'a>(repo: Option<&'a str>, name: Option<&'a str>) -> CargoResult<TemplateType<'a>> {
+fn get_template_type<'a>(repo: Option<&'a str>, 
+                         name: Option<&'a str>
+                         ) -> CargoResult<TemplateType<'a>> {
     match (repo, name) {
         (Some(repo_url), _) if repo_url.starts_with("http://")  ||
             repo_url.starts_with("https://") ||
@@ -150,7 +152,8 @@ fn get_input_template(config: &Config, opts: &MkOptions) -> CargoResult<Template
             match Repository::clone(repo_url, &*template_dir.path()) {
                 Ok(_) => {},
                 Err(e) => {
-                    return Err(human(format!( "Failed to clone repository: {} - {}", path.display(), e)))
+                    return Err(human(format!( 
+                                "Failed to clone repository: {} - {}", path.display(), e)))
                 }
             };
             TemplateDirectory::Temp(template_dir)
