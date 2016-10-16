@@ -111,6 +111,26 @@ impl TemplateDirectory {
     }
 }
 
+// The type of template we will use.
+#[derive(Debug, Eq, PartialEq)]
+enum TemplateType<'a>  {
+    GitRepo(&'a str),
+    LocalDir(&'a str),
+    Builtin
+}
+
+fn get_template_type<'a>(repo: Option<&'a str>, name: Option<&'a str>) -> CargoResult<TemplateType<'a>> {
+    match (repo, name) {
+        (Some(repo_url), _) if repo_url.starts_with("http://")  ||
+            repo_url.starts_with("https://") ||
+            repo_url.starts_with("file://") ||
+            repo_url.starts_with("git@") => Ok(TemplateType::GitRepo(repo_url)),
+        (Some(directory), _) => Ok(TemplateType::LocalDir(directory)),
+        (None, Some(_)) => Err(human("A template was given, but no template repository")),
+        (None, None) => Ok(TemplateType::Builtin)
+    }
+}
+
 fn get_input_template(config: &Config, opts: &MkOptions) -> CargoResult<TemplateDirectory> {
     let path = opts.path;
     let name = opts.name;
@@ -119,36 +139,29 @@ fn get_input_template(config: &Config, opts: &MkOptions) -> CargoResult<Template
         try!(fs::create_dir_all(&templates_dir));
     }
 
-    let template_dir = match (opts.template_repo, opts.template) {
+    let template_type = try!(get_template_type(opts.template_repo, opts.template));
+    let template_dir = match template_type {
         // given template is a remote git repository & needs to be cloned
-        (Some(template_url), _) if template_url.starts_with("http://")  ||
-            template_url.starts_with("https://") ||
-            template_url.starts_with("file://")  || 
-            template_url.starts_with("git@") => {
-                let template_dir = try!(TempDir::new(name));
-                println!("Checking out repo to dir: {}", template_dir.path().display());
+        TemplateType::GitRepo(repo_url) => {
+            let template_dir = try!(TempDir::new(name));
+            println!("Checking out repo to dir: {}", template_dir.path().display());
 
-                try!(config.shell().status("Cloning", template_url));
-                match Repository::clone(template_url, &*template_dir.path()) {
-                    Ok(_) => {},
-                    Err(e) => {
-                        return Err(human(format!(
-                                    "Failed to clone repository: {} - {}", path.display(), e)))
-                    }
-                };
-                TemplateDirectory::Temp(template_dir)
-            },
-        // given template is a local directory
-        (Some(directory), _) => {
-            TemplateDirectory::Normal(PathBuf::from(directory))
-
+            try!(config.shell().status("Cloning", repo_url));
+            match Repository::clone(repo_url, &*template_dir.path()) {
+                Ok(_) => {},
+                Err(e) => {
+                    return Err(human(format!( "Failed to clone repository: {} - {}", path.display(), e)))
+                }
+            };
+            TemplateDirectory::Temp(template_dir)
         },
-        (None, Some(_)) => {
-            return Err(human("A template was given, but no template repository"));
+        // given template is a local directory
+        TemplateType::LocalDir(directory) => {
+            TemplateDirectory::Normal(PathBuf::from(directory))
         },
         // no template given, use either "lib" or "bin" templates depending on the
         // presence of the --bin flag.
-        (None, None) => {
+        TemplateType::Builtin => {
             let temp_templates_dir = try!(TempDir::new(name));
             let temp_templates_path = temp_templates_dir.path().to_path_buf();
             if opts.bin {
@@ -161,7 +174,6 @@ fn get_input_template(config: &Config, opts: &MkOptions) -> CargoResult<Template
     };
     Ok(template_dir)
 }
-
 
 fn get_name<'a>(path: &'a Path, opts: &'a NewOptions, config: &Config) -> CargoResult<&'a str> {
     if let Some(name) = opts.name {
@@ -732,6 +744,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::strip_rust_affixes;
+    use super::{TemplateType, get_template_type};
 
     #[test]
     fn affixes_stripped() {
@@ -743,5 +756,56 @@ mod tests {
         assert_eq!(strip_rust_affixes("foo-rs-rs"), "foo-rs");
         // It shouldn't touch the middle
         assert_eq!(strip_rust_affixes("some-rust-crate"), "some-rust-crate");
+    }
+
+    macro_rules! test_get_template_proto {
+        ( $funcname:ident, $url:expr ) => {
+            #[test]
+            fn $funcname() {
+                assert_eq!(get_template_type(Some($url), Some("foo")).unwrap(),
+                TemplateType::GitRepo($url));
+                assert_eq!(get_template_type(Some($url), Some("")).unwrap(),
+                TemplateType::GitRepo($url));
+                assert_eq!(get_template_type(Some($url), None).unwrap(),
+                TemplateType::GitRepo($url));
+            }
+        }
+    }
+
+    test_get_template_proto!(test_get_template_http, "http://foo.com/user/repo");
+    test_get_template_proto!(test_get_template_https, "https://foo.com/user/repo");
+    test_get_template_proto!(test_get_template_file, "file://foo.com/user/repo");
+    test_get_template_proto!(test_get_template_git, "git@foo.com:user/repo");
+
+    #[test]
+    fn test_get_template_type_git_repo_bad_proto_is_local_dir() {
+        // We didn't detect a protocol that we use, so it's treated as a directory.
+        assert_eq!(get_template_type(Some("ftps://foo.com/user/repo"), None).unwrap(),
+                   TemplateType::LocalDir("ftps://foo.com/user/repo"));
+    }
+
+    #[test]
+    fn test_get_template_type_local_dir_abs() {
+        assert_eq!(get_template_type(Some("/foo/user/repo"), Some("foo")).unwrap(),
+                   TemplateType::LocalDir("/foo/user/repo"));
+        assert_eq!(get_template_type(Some("/foo/user/repo"), Some("")).unwrap(),
+                   TemplateType::LocalDir("/foo/user/repo"));
+        assert_eq!(get_template_type(Some("/foo/user/repo"), None).unwrap(),
+                   TemplateType::LocalDir("/foo/user/repo"));
+    }
+
+    #[test]
+    fn test_get_template_type_local_dir_rel() {
+        assert_eq!(get_template_type(Some("foo/user/repo"), Some("foo")).unwrap(),
+                   TemplateType::LocalDir("foo/user/repo"));
+        assert_eq!(get_template_type(Some("foo/user/repo"), Some("")).unwrap(),
+                   TemplateType::LocalDir("foo/user/repo"));
+        assert_eq!(get_template_type(Some("foo/user/repo"), None).unwrap(),
+                   TemplateType::LocalDir("foo/user/repo"));
+    }
+
+    #[test]
+    fn test_get_template_type_builtin() {
+        assert_eq!(get_template_type(None, None).unwrap(), TemplateType::Builtin);
     }
 }
