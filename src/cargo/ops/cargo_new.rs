@@ -1,6 +1,6 @@
 use std::env;
 use std::fs::{self, File, DirEntry, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{Read};
 use std::path::{Path, PathBuf, MAIN_SEPARATOR};
 use std::collections::BTreeMap;
 use rustc_serialize::{Decodable, Decoder};
@@ -146,16 +146,10 @@ fn get_input_template(config: &Config, opts: &MkOptions) -> CargoResult<Template
         // given template is a remote git repository & needs to be cloned
         TemplateType::GitRepo(repo_url) => {
             let template_dir = try!(TempDir::new(name));
-            println!("Checking out repo to dir: {}", template_dir.path().display());
-
             try!(config.shell().status("Cloning", repo_url));
-            match Repository::clone(repo_url, &*template_dir.path()) {
-                Ok(_) => {},
-                Err(e) => {
-                    return Err(human(format!( 
-                                "Failed to clone repository: {} - {}", path.display(), e)))
-                }
-            };
+            try!(Repository::clone(repo_url, &*template_dir.path()).chain_error(|| {
+                human(format!("Failed to clone repository: {}", path.display()))
+            }));
             TemplateDirectory::Temp(template_dir)
         },
         // given template is a local directory
@@ -461,10 +455,6 @@ fn existing_vcs_repo(path: &Path, cwd: &Path) -> bool {
     GitRepo::discover(path, cwd).is_ok() || HgRepo::discover(path, cwd).is_ok()
 }
 
-fn file(p: &Path, contents: &[u8]) -> io::Result<()> {
-        try!(File::create(p)).write_all(contents)
-}
-
 fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
     let path = opts.path;
     let name = opts.name;
@@ -518,7 +508,7 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
 
     // make sure that the template exists
     if fs::metadata(&template_path).is_err() {
-        return Err(human(format!("Template `{}` not found", template_path.display())))
+        bail!("template `{}` not found", template_path.display());
     }
 
     // construct the mapping used to populate the template
@@ -670,9 +660,7 @@ fn global_config(config: &Config) -> CargoResult<CargoNewConfig> {
 ///    http://doc.rust-lang.org/std/fs/fn.read_dir.html
 fn walk_template_dir(dir: &Path, cb: &mut FnMut(DirEntry)) -> CargoResult<()> {
     let attr = try!(fs::metadata(&dir));
-
-    let ignore_files = vec!(".gitignore");
-    let ignore_types = vec!("png", "jpg", "gif");
+    let ignore_files = vec![".gitignore"];
 
     if attr.is_dir() {
         for entry in try!(fs::read_dir(dir)) {
@@ -683,12 +671,7 @@ fn walk_template_dir(dir: &Path, cb: &mut FnMut(DirEntry)) -> CargoResult<()> {
                     try!(walk_template_dir(&entry.path(), cb));
                 }
             } else {
-                if let &Some(extension) = &entry.path().extension() {
-                    if ignore_types.contains(&extension.to_str().unwrap()) {
-                        continue
-                    }
-                }
-                if let &Some(file_name) = &entry.path().file_name() {
+                if let Some(file_name) = entry.path().file_name() {
                     if ignore_files.contains(&file_name.to_str().unwrap()) {
                         continue
                     }
@@ -712,7 +695,7 @@ fn create_generic_template(path: &PathBuf) -> CargoResult<()> {
         Ok(_) => {}
         Err(_) => { try!(fs::create_dir(&path.join("src"))); }
     }
-    try!(file(&path.join("Cargo.toml"), br#"[package]
+    try!(paths::file(&path.join("Cargo.toml"), br#"[package]
 name = "{{name}}"
 version = "0.1.0"
 authors = [{{authors}}]
@@ -723,7 +706,7 @@ authors = [{{authors}}]
 /// Create a new "lib" project
 fn create_lib_template(path: &PathBuf) -> CargoResult<()> {
     try!(create_generic_template(&path));
-    try!(file(&path.join("src/lib.rs"), br#"#[test]
+    try!(paths::file(&path.join("src/lib.rs"), br#"#[test]
 fn it_works() {
 }
 "#));
@@ -733,7 +716,7 @@ fn it_works() {
 /// Create a new "bin" project
 fn create_bin_template(path: &PathBuf) -> CargoResult<()> {
     try!(create_generic_template(&path));
-    try!(file(&path.join("src/main.rs"), b"\
+    try!(paths::file(&path.join("src/main.rs"), b"\
 fn main() {
     println!(\"Hello, world!\");
 }
