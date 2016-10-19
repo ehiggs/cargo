@@ -527,8 +527,10 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
     // template and render it with the above data to a new file inside the target directory
     try!(walk_template_dir(&template_path, &mut |entry| {
         let entry_path = entry.path();
-        let entry_str = entry_path.to_str().unwrap();
-        let template_dir_str = template_path.to_str().unwrap();
+        let entry_str = try!(entry_path.to_str().ok_or(
+                human(format!("Could not convert path to string: {}", entry_path.display()))));
+        let template_dir_str = try!(template_path.to_str().ok_or(
+                human(format!("Could not convert path to string: {}", template_path.display()))));
 
         // the path we have here is the absolute path to the file in the template directory
         // we need to trim this down to be just the path from the root of the template.
@@ -542,7 +544,12 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
         }
 
         let mut template_str = String::new();
-        File::open(&entry_path).unwrap().read_to_string(&mut template_str).unwrap();
+        let mut entry_file = try!(File::open(&entry_path).chain_error(|| {
+            human(format!("Failed to open file for templating: {}", entry_path.display()))
+        }));
+        try!(entry_file.read_to_string(&mut template_str).chain_error(|| {
+            human(format!("Failed to read file for templating: {}", entry_path.display()))
+        }));
         let mut dest_path = PathBuf::from(path).join(dest_file_name);
 
         // dest_file_name could now refer to a file inside a directory which doesn't yet exist
@@ -563,20 +570,23 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
 
         // if we are running init, we do not clobber existing files.
         if fs::metadata(&dest_path).is_ok() {
-            return;
+            return Ok(());
         }
 
         // if the template file has the ".hbs" extension, remove that to get the correct
         // name for the generated file
         if let Some(ext) = dest_path.clone().extension() {
-            if ext.to_str().unwrap() == "hbs" {
+            if ext.to_str() == Some("hbs") {
                 dest_path.set_extension("");
             }
         }
 
         // create the new file & render the template to it
-        let mut dest_file = OpenOptions::new().write(true).create(true).open(&dest_path).unwrap();
+        let mut dest_file = try!(OpenOptions::new().write(true).create(true).open(&dest_path).chain_error(|| {
+            human(format!("Failed to open file for writing: {}", dest_path.display()))
+        }));
         handlebars.template_renderw(&template_str, &Context::wraps(&data), &mut dest_file).ok();
+        Ok(())
     }));
 
     if let Err(e) = Workspace::new(&path.join("Cargo.toml"), config) {
@@ -658,7 +668,7 @@ fn global_config(config: &Config) -> CargoResult<CargoNewConfig> {
 ///
 /// This is a modified version of the example at:
 ///    http://doc.rust-lang.org/std/fs/fn.read_dir.html
-fn walk_template_dir(dir: &Path, cb: &mut FnMut(DirEntry)) -> CargoResult<()> {
+fn walk_template_dir(dir: &Path, cb: &mut FnMut(DirEntry) -> CargoResult<()>) -> CargoResult<()> {
     let attr = try!(fs::metadata(&dir));
     let ignore_files = vec![".gitignore"];
 
@@ -676,7 +686,7 @@ fn walk_template_dir(dir: &Path, cb: &mut FnMut(DirEntry)) -> CargoResult<()> {
                         continue
                     }
                 }
-                cb(entry);
+                try!(cb(entry));
             }
         }
     }
