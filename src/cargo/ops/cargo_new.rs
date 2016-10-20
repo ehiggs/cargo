@@ -582,7 +582,9 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
         }
 
         // create the new file & render the template to it
-        let mut dest_file = try!(OpenOptions::new().write(true).create(true).open(&dest_path).chain_error(|| {
+        let mut dest_file = try!(OpenOptions::new().write(true)
+                                                   .create(true)
+                                                   .open(&dest_path).chain_error(|| {
             human(format!("Failed to open file for writing: {}", dest_path.display()))
         }));
         handlebars.template_renderw(&template_str, &Context::wraps(&data), &mut dest_file).ok();
