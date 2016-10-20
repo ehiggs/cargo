@@ -15,10 +15,7 @@ use tempdir::TempDir;
 
 use core::Workspace;
 use util::{GitRepo, HgRepo, CargoResult, human, ChainError, internal};
-use util::{Config, paths};
-
-
-use toml;
+use util::{Config, paths, template};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum VersionControl { Git, Hg, NoVcs }
@@ -517,11 +514,13 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
     let mut handlebars = Handlebars::new();
     // We don't want html escaping...
     handlebars.register_escape_fn(no_escape);
+    // Unless users explicitly ask for it...
+    handlebars.register_helper("toml-escape", Box::new(template::toml_escape_helper));
+    handlebars.register_helper("html-escape", Box::new(template::html_escape_helper));
 
     let mut data = BTreeMap::new();
     data.insert("name".to_owned(), name.to_owned());
-    let author_value = format!("{}", toml::Value::String(author));
-    data.insert("authors".to_owned(), author_value);
+    data.insert("author".to_owned(), author);
 
     // For every file found inside the given template directory, compile it as a handlebars
     // template and render it with the above data to a new file inside the target directory
@@ -587,8 +586,10 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
                                                    .open(&dest_path).chain_error(|| {
             human(format!("Failed to open file for writing: {}", dest_path.display()))
         }));
-        handlebars.template_renderw(&template_str, &Context::wraps(&data), &mut dest_file).ok();
-        Ok(())
+        handlebars.template_renderw(&template_str, &Context::wraps(&data), &mut dest_file)
+            .chain_error(|| {
+                human(format!("Failed to render template for file: {}", dest_path.display()))
+            })
     }));
 
     if let Err(e) = Workspace::new(&path.join("Cargo.toml"), config) {
@@ -710,7 +711,7 @@ fn create_generic_template(path: &PathBuf) -> CargoResult<()> {
     try!(paths::file(&path.join("Cargo.toml"), br#"[package]
 name = "{{name}}"
 version = "0.1.0"
-authors = [{{authors}}]
+authors = [{{toml-escape author}}]
 "#));
     Ok(())
 }

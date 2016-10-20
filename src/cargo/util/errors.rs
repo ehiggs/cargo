@@ -9,6 +9,7 @@ use std::string;
 
 use curl;
 use git2;
+use handlebars;
 use rustc_serialize::json;
 use semver;
 use term;
@@ -371,6 +372,7 @@ impl CargoError for ffi::NulError {}
 impl CargoError for term::Error {}
 impl CargoError for num::ParseIntError {}
 impl CargoError for str::ParseBoolError {}
+impl CargoError for handlebars::TemplateRenderError {}
 
 // =============================================================================
 // Construction helpers

@@ -63,7 +63,7 @@ fn simple_template() {
                       .unwrap().write_all(br#"[package]
 name = "{{name}}"
 version = "0.0.1"
-authors = [{{authors}}]
+authors = ["{{author}}"]
 "#).unwrap();
     File::create(&root.join("home/.cargo/templates/testtemplate/src/main.rs"))
                       .unwrap().write_all(br#"
@@ -99,7 +99,7 @@ fn git_template() {
             .file("Cargo.toml", r#"[package]
 name = "{{name}}"
 version = "0.0.1"
-authors = [{{authors}}]
+authors = ["{{author}}"]
             "#)
             .file("src/main.rs", r#"
                 pub fn main() {
