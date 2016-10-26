@@ -140,7 +140,7 @@ mod test {
         handlebars.register_helper("toml-escape", Box::new(toml_escape_helper));
         let mut data = BTreeMap::new();
         data.insert("name".to_owned(), "\"Iron\" Mike Tyson".to_owned());
-        let result = handlebars.template_render("Hello, {{#toml-escape name}}{{/toml-escape}}", &data).unwrap();
+        let result = handlebars.template_render("Hello, {{toml-escape name}}", &data).unwrap();
         assert_eq!(result, "Hello, \"\\\"Iron\\\" Mike Tyson\"");
     }
 }

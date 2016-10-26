@@ -12,6 +12,7 @@ use term::color::BLACK;
 use handlebars::{Handlebars, Context, no_escape};
 use tempdir::TempDir;
 
+use core::Workspace;
 use util::{GitRepo, HgRepo, CargoResult, human, ChainError, internal};
 use util::{Config, paths, template};
 use util::template::{TemplateSet, TemplateFile, TemplateDirectory, TemplateType};
@@ -476,6 +477,7 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
             try!(fs::create_dir_all(path));
         },
     };
+
     let (author_name, email) = try!(discover_author());
     // Hoo boy, sure glad we've got exhaustivenes checking behind us.
     let author = match (cfg.name.clone(), cfg.email.clone(), author_name, email) {
@@ -528,6 +530,13 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
         }))
 
     }
+
+    if let Err(e) = Workspace::new(&path.join("Cargo.toml"), config) {
+        let msg = format!("compiling this new crate may not work due to invalid \
+                           workspace configuration\n\n{}", e);
+        try!(config.shell().warn(msg));
+    }
+
     Ok(())
 }
 
