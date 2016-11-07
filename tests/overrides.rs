@@ -73,7 +73,7 @@ fn missing_version() {
 error: failed to parse manifest at `[..]`
 
 Caused by:
-  replacements must specify a version to replace, but `foo` does not
+  replacements must specify a version to replace, but `[..]foo` does not
 "));
 }
 
@@ -468,7 +468,7 @@ fn override_wrong_name() {
                 execs().with_status(101).with_stderr("\
 [UPDATING] registry [..]
 [UPDATING] git repository [..]
-error: no matching package for override `foo:0.1.0` found
+error: no matching package for override `[..]foo:0.1.0` found
 location searched: file://[..]
 version required: = 0.1.0
 "));
@@ -530,7 +530,7 @@ fn override_wrong_version() {
 error: failed to parse manifest at `[..]`
 
 Caused by:
-  replacements cannot specify a version requirement, but found one for `foo:0.1.0`
+  replacements cannot specify a version requirement, but found one for `[..]foo:0.1.0`
 "));
 }
 
@@ -774,4 +774,154 @@ http://doc.crates.io/specifying-dependencies.html#overriding-dependencies
 [COMPILING] [..]
 [FINISHED] [..]
 "));
+}
+
+#[test]
+fn override_an_override() {
+    Package::new("chrono", "0.2.0").dep("serde", "< 0.9").publish();
+    Package::new("serde", "0.7.0")
+        .file("src/lib.rs", "pub fn serde07() {}")
+        .publish();
+    Package::new("serde", "0.8.0")
+        .file("src/lib.rs", "pub fn serde08() {}")
+        .publish();
+
+    let p = project("local")
+        .file("Cargo.toml", r#"
+            [package]
+            name = "local"
+            version = "0.0.1"
+            authors = []
+
+            [dependencies]
+            chrono = "0.2"
+            serde = "0.8"
+
+            [replace]
+            "chrono:0.2.0" = { path = "chrono" }
+            "serde:0.8.0" = { path = "serde" }
+        "#)
+        .file("Cargo.lock", r#"
+            [root]
+            name = "local"
+            version = "0.0.1"
+            dependencies = [
+             "chrono 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+             "serde 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
+            ]
+
+            [[package]]
+            name = "chrono"
+            version = "0.2.0"
+            source = "registry+https://github.com/rust-lang/crates.io-index"
+            replace = "chrono 0.2.0"
+
+            [[package]]
+            name = "chrono"
+            version = "0.2.0"
+            dependencies = [
+             "serde 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+            ]
+
+            [[package]]
+            name = "serde"
+            version = "0.7.0"
+            source = "registry+https://github.com/rust-lang/crates.io-index"
+
+            [[package]]
+            name = "serde"
+            version = "0.8.0"
+            source = "registry+https://github.com/rust-lang/crates.io-index"
+            replace = "serde 0.8.0"
+
+            [[package]]
+            name = "serde"
+            version = "0.8.0"
+        "#)
+        .file("src/lib.rs", "
+            extern crate chrono;
+            extern crate serde;
+
+            pub fn local() {
+                chrono::chrono();
+                serde::serde08_override();
+            }
+        ")
+        .file("chrono/Cargo.toml", r#"
+            [package]
+            name = "chrono"
+            version = "0.2.0"
+            authors = []
+
+            [dependencies]
+            serde = "< 0.9"
+        "#)
+        .file("chrono/src/lib.rs", "
+            extern crate serde;
+            pub fn chrono() {
+                serde::serde07();
+            }
+        ")
+        .file("serde/Cargo.toml", r#"
+            [package]
+            name = "serde"
+            version = "0.8.0"
+            authors = []
+        "#)
+        .file("serde/src/lib.rs", "
+            pub fn serde08_override() {}
+        ");
+
+    assert_that(p.cargo_process("build").arg("-v"),
+                execs().with_status(0));
+}
+
+#[test]
+fn overriding_nonexistent_no_spurious() {
+    Package::new("foo", "0.1.0").dep("bar", "0.1").publish();
+    Package::new("bar", "0.1.0").publish();
+
+    let foo = git::repo(&paths::root().join("override"))
+        .file("Cargo.toml", r#"
+            [package]
+            name = "foo"
+            version = "0.1.0"
+            authors = []
+
+            [dependencies]
+            bar = { path = "bar" }
+        "#)
+        .file("src/lib.rs", "pub fn foo() {}")
+        .file("bar/Cargo.toml", r#"
+            [package]
+            name = "bar"
+            version = "0.1.0"
+            authors = []
+        "#)
+        .file("bar/src/lib.rs", "pub fn foo() {}");
+    foo.build();
+
+
+    let p = project("local")
+        .file("Cargo.toml", &format!(r#"
+            [package]
+            name = "local"
+            version = "0.0.1"
+            authors = []
+
+            [dependencies]
+            foo = "0.1.0"
+
+            [replace]
+            "foo:0.1.0" = {{ git = '{url}' }}
+            "bar:0.1.0" = {{ git = '{url}' }}
+        "#, url = foo.url()))
+        .file("src/lib.rs", "");
+
+    assert_that(p.cargo_process("build"),
+                execs().with_status(0));
+    assert_that(p.cargo("build"),
+                execs().with_status(0).with_stderr("\
+[FINISHED] [..]
+").with_stdout(""));
 }

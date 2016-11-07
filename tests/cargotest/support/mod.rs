@@ -351,7 +351,7 @@ impl Execs {
                  description: &str, extra: &[u8],
                  partial: bool) -> ham::MatchResult {
         let out = match expected {
-            Some(out) => substitute_macros(out),
+            Some(out) => out,
             None => return ham::success(),
         };
         let actual = match str::from_utf8(actual) {
@@ -432,6 +432,7 @@ impl Execs {
 }
 
 pub fn lines_match(expected: &str, mut actual: &str) -> bool {
+    let expected = substitute_macros(expected);
     for (i, part) in expected.split("[..]").enumerate() {
         match actual.find(part) {
             Some(j) => {
@@ -608,7 +609,7 @@ pub fn shell_writes<T: fmt::Display>(string: T) -> ShellWrites {
 }
 
 pub trait Tap {
-    fn tap<F: FnOnce(&mut Self)>(mut self, callback: F) -> Self;
+    fn tap<F: FnOnce(&mut Self)>(self, callback: F) -> Self;
 }
 
 impl<T> Tap for T {
@@ -672,6 +673,8 @@ fn substitute_macros(input: &str) -> String {
         ("[INSTALLING]",  "  Installing"),
         ("[REPLACING]",   "   Replacing"),
         ("[UNPACKING]",   "   Unpacking"),
+        ("[EXE]", if cfg!(windows) {".exe"} else {""}),
+        ("[/]", if cfg!(windows) {"\\"} else {"/"}),
     ];
     let mut result = input.to_owned();
     for &(pat, subst) in macros.iter() {

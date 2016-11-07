@@ -445,7 +445,7 @@ fn doc_release() {
                 execs().with_status(0)
                        .with_stderr("\
 [DOCUMENTING] foo v0.0.1 ([..])
-[RUNNING] `rustdoc src[..]lib.rs [..]`
+[RUNNING] `rustdoc src[/]lib.rs [..]`
 "));
 }
 
@@ -589,4 +589,26 @@ fn document_only_lib() {
     assert_that(p.cargo_process("doc").arg("--lib"),
                 execs().with_status(0));
     assert_that(&p.root().join("target/doc/foo/index.html"), existing_file());
+}
+
+#[test]
+fn plugins_no_use_target() {
+    if !cargotest::is_nightly() {
+        return
+    }
+    let p = project("foo")
+        .file("Cargo.toml", r#"
+            [package]
+            name = "foo"
+            version = "0.0.1"
+            authors = []
+
+            [lib]
+            proc-macro = true
+        "#)
+        .file("src/lib.rs", "");
+    assert_that(p.cargo_process("doc")
+                 .arg("--target=x86_64-unknown-openbsd")
+                 .arg("-v"),
+                execs().with_status(0));
 }

@@ -10,8 +10,7 @@ use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 
-use cargo::util::process;
-use cargotest::cargo_process;
+use cargotest::{cargo_process, process};
 use cargotest::support::{project, execs, paths, git, path2url, cargo_dir};
 use flate2::read::GzDecoder;
 use hamcrest::{assert_that, existing_file, contains};
@@ -48,7 +47,7 @@ See [..]
     assert_that(p.cargo("package").arg("-l"),
                 execs().with_status(0).with_stdout("\
 Cargo.toml
-src[..]main.rs
+src[/]main.rs
 "));
     assert_that(p.cargo("package"),
                 execs().with_status(0).with_stdout(""));

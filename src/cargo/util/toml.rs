@@ -15,6 +15,7 @@ use core::{EitherManifest, VirtualManifest};
 use core::dependency::{Kind, Platform};
 use core::manifest::{LibKind, Profile, ManifestMetadata};
 use core::package_id::Metadata;
+use sources::CRATES_IO;
 use util::{self, CargoResult, human, ToUrl, ToSemver, ChainError, Config};
 
 /// Representation of the projects file layout.
@@ -725,6 +726,7 @@ impl TomlManifest {
             platform: None,
             layout: layout,
         }));
+        let profiles = build_profiles(&self.profile);
         let workspace_config = match self.workspace {
             Some(ref config) => {
                 WorkspaceConfig::Root { members: config.members.clone() }
@@ -733,18 +735,21 @@ impl TomlManifest {
                 bail!("virtual manifests must be configured with [workspace]");
             }
         };
-        Ok((VirtualManifest::new(replace, workspace_config), nested_paths))
+        Ok((VirtualManifest::new(replace, workspace_config, profiles), nested_paths))
     }
 
     fn replace(&self, cx: &mut Context)
                -> CargoResult<Vec<(PackageIdSpec, Dependency)>> {
         let mut replace = Vec::new();
         for (spec, replacement) in self.replace.iter().flat_map(|x| x) {
-            let spec = try!(PackageIdSpec::parse(spec).chain_error(|| {
+            let mut spec = try!(PackageIdSpec::parse(spec).chain_error(|| {
                 human(format!("replacements must specify a valid semver \
                                version to replace, but `{}` does not",
                               spec))
             }));
+            if spec.url().is_none() {
+                spec.set_url(CRATES_IO.parse().unwrap());
+            }
 
             let version_specified = match *replacement {
                 TomlDependency::Detailed(ref d) => d.version.is_some(),
@@ -1239,6 +1244,10 @@ fn build_profiles(profiles: &Option<TomlProfiles>) -> Profiles {
                    profiles.and_then(|p| p.doc.as_ref())),
         custom_build: Profile::default_custom_build(),
     };
+    // The test/bench targets cannot have panic=abort because they'll all get
+    // compiled with --test which requires the unwind runtime currently
+    profiles.test.panic = None;
+    profiles.bench.panic = None;
     profiles.test_deps.panic = None;
     profiles.bench_deps.panic = None;
     return profiles;

@@ -100,11 +100,14 @@ pub fn compile<'a>(ws: &Workspace<'a>, options: &CompileOptions<'a>)
 
 pub fn resolve_dependencies<'a>(ws: &Workspace<'a>,
                                 source: Option<Box<Source + 'a>>,
-                                features: Vec<String>,
+                                features: &[String],
                                 all_features: bool,
                                 no_default_features: bool,
                                 spec: &'a [String])
                                 -> CargoResult<(PackageSet<'a>, Resolve)> {
+    let features = features.iter().flat_map(|s| {
+        s.split_whitespace()
+    }).map(|s| s.to_string()).collect::<Vec<String>>();
 
     let mut registry = try!(PackageRegistry::new(ws.config()));
 
@@ -161,15 +164,12 @@ pub fn compile_ws<'a>(ws: &Workspace<'a>,
                          ref target_rustc_args } = *options;
 
     let target = target.map(|s| s.to_string());
-    let features = features.iter().flat_map(|s| {
-        s.split(' ')
-    }).map(|s| s.to_string()).collect::<Vec<String>>();
 
     if jobs == Some(0) {
         bail!("jobs must be at least 1")
     }
 
-    let profiles = root_package.manifest().profiles();
+    let profiles = ws.profiles();
     if spec.len() == 0 {
         try!(generate_targets(root_package, profiles, mode, filter, release));
     }
@@ -245,7 +245,7 @@ pub fn compile_ws<'a>(ws: &Workspace<'a>,
         let _p = profile::start("compiling");
         let mut build_config = try!(scrape_build_config(config, jobs, target));
         build_config.release = release;
-        build_config.test = mode == CompileMode::Test;
+        build_config.test = mode == CompileMode::Test || mode == CompileMode::Bench;
         build_config.json_errors = message_format == MessageFormat::Json;
         if let CompileMode::Doc { deps } = mode {
             build_config.doc_all = deps;
