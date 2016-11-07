@@ -1,5 +1,5 @@
 use std::env;
-use std::fs::{self, DirEntry, OpenOptions};
+use std::fs::{self, DirEntry, File};
 use std::path::{Path, PathBuf, MAIN_SEPARATOR};
 use std::collections::BTreeMap;
 use rustc_serialize::{Decodable, Decoder};
@@ -16,7 +16,7 @@ use core::Workspace;
 use util::{GitRepo, HgRepo, CargoResult, human, ChainError, internal};
 use util::{Config, paths, template};
 use util::template::{TemplateSet, TemplateFile, TemplateDirectory, TemplateType};
-use util::template::{InputFileTemplateFile, InMemoryTemplateFile};
+use util::template::{InputFileTemplateFile, InMemoryTemplateFile, get_template_type};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum VersionControl { Git, Hg, NoVcs }
@@ -72,7 +72,7 @@ impl<'a> NewOptions<'a> {
         // default to lib
         let is_lib = if !bin {
             true
-       }
+        }
         else {
             lib
         };
@@ -98,10 +98,6 @@ struct CargoNewConfig {
 fn get_input_template(config: &Config, opts: &MkOptions) -> CargoResult<TemplateSet> {
     let path = opts.path;
     let name = opts.name;
-    let templates_dir = config.template_path();
-    if fs::metadata(&templates_dir).is_err() {
-        try!(fs::create_dir_all(&templates_dir));
-    }
 
     let template_type = try!(get_template_type(opts.template_repo, opts.template));
     let template_set = match template_type {
@@ -173,19 +169,6 @@ fn get_name<'a>(path: &'a Path, opts: &'a NewOptions, config: &Config) -> CargoR
             try!(config.shell().say(&message, BLACK));
         }
         Ok(new_name)
-    }
-}
-
-fn get_template_type<'a>(repo: Option<&'a str>,
-                             name: Option<&'a str>) -> CargoResult<TemplateType<'a>> {
-    match (repo, name) {
-        (Some(repo_url), _) if repo_url.starts_with("http://")  ||
-            repo_url.starts_with("https://") ||
-            repo_url.starts_with("file://") ||
-            repo_url.starts_with("git@") => Ok(TemplateType::GitRepo(repo_url)),
-        (Some(directory), _) => Ok(TemplateType::LocalDir(directory)),
-        (None, Some(_)) => Err(human("A template was given, but no template repository")),
-        (None, None) => Ok(TemplateType::Builtin)
     }
 }
 
@@ -505,22 +488,24 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
     let template_set = try!(get_input_template(config, opts));
     for template in template_set.template_files.iter() {
         let template_str = try!(template.template());
-        //let dest_file_name = try!(abs_to_rel_path(entry_path, template_path));
-        //let mut dest_path = PathBuf::from(path).join(dest_file_name);
-        let dest_path = PathBuf::from(path).join(template.path());
+        let dest_path = path.join(template.path());
 
         // Skip files that already exist.
         if fs::metadata(&dest_path).is_ok() {
             continue;
         }
 
-        create_deep_subdirs(&dest_path);
+        let parent = try!(dest_path.parent()
+                          .chain_error(||
+                                       human(format!("failed to make sure parent directory \
+                                                    exists for {}", dest_path.display()))));
+        try!(fs::create_dir_all(&parent)
+             .chain_error(|| human(format!("failed to create path to destination file {}", 
+                                           parent.display()))));
 
         // create the new file & render the template to it
-        let mut dest_file = try!(OpenOptions::new().write(true)
-                                 .create(true)
-                                 .open(&dest_path).chain_error(|| {
-                                     human(format!("Failed to open file for writing: {}",
+        let mut dest_file = try!(File::create(&dest_path).chain_error(|| {
+                                     human(format!("failed to open file for writing: {}",
                                                    dest_path.display()))
                                  }));
 
@@ -636,22 +621,25 @@ fn walk_template_dir(dir: &Path, cb: &mut FnMut(DirEntry) -> CargoResult<()>) ->
     let attr = try!(fs::metadata(&dir));
     let ignore_files = vec![".gitignore"];
 
-    if attr.is_dir() {
-        for entry in try!(fs::read_dir(dir)) {
-            let entry = try!(entry);
-            let attr = try!(fs::metadata(&entry.path()));
-            if attr.is_dir() {
-                if !&entry.path().to_str().unwrap().contains(".git") {
+    if !attr.is_dir() {
+        return Ok(());
+    }
+    for entry in try!(fs::read_dir(dir)) {
+        let entry = try!(entry);
+        let attr = try!(fs::metadata(&entry.path()));
+        if attr.is_dir() {
+            if let Some(ref path_str) = entry.path().to_str() {
+                if !&path_str.contains(".git") {
                     try!(walk_template_dir(&entry.path(), cb));
                 }
-            } else {
-                if let Some(file_name) = entry.path().file_name() {
-                    if ignore_files.contains(&file_name.to_str().unwrap()) {
-                        continue
-                    }
-                }
-                try!(cb(entry));
             }
+        } else {
+            if let Some(file_name) = entry.path().file_name() {
+                if ignore_files.contains(&file_name.to_str().unwrap()) {
+                    continue
+                }
+            }
+            try!(cb(entry));
         }
     }
     Ok(())
@@ -666,6 +654,8 @@ fn create_generic_template() -> Vec<Box<TemplateFile>> {
 name = "{{name}}"
 version = "0.1.0"
 authors = [{{toml-escape author}}]
+
+[dependencies]
 "#)));
     vec![template_file]
 }
@@ -694,28 +684,11 @@ String::from("fn main() {
     template_files
 }
 
-// Create subdirs for files deeper than <project-name>/<src>.
-// 'path' could refers to a file inside a directory which doesn't yet exist
-// to figure out if this is the case, get all the components in the dest_file_name and check
-// how many there are. Files in the root of the new project direcotory will have two
-// components, anything more than that means the file is in a sub-directory, so we need
-// to create it.
-fn create_deep_subdirs(path: &Path) {
-    let components  = path.components().collect::<Vec<_>>();
-    if components.len() > 2 {
-        if let Some(p) = path.parent() {
-            if fs::metadata(&p).is_err() {
-                let _ = fs::create_dir_all(&p);
-            }
-        }
-    }
-}
-
 fn abs_to_rel_path(abspath: &Path, rel_part: &Path) -> CargoResult<PathBuf> {
     let abspath_str= try!(abspath.to_str().ok_or(
-            human(format!("Could not convert path to string: {}", abspath.display()))));
+            human(format!("could not convert path to string: {}", abspath.display()))));
     let rel_str = try!(rel_part.to_str().ok_or(
-            human(format!("Could not convert path to string: {}", rel_part.display()))));
+            human(format!("could not convert path to string: {}", rel_part.display()))));
     // the path we have here is the absolute path to the file in the template directory
     // we need to trim this down to be just the path from the root of the template.
     // For example:
@@ -732,8 +705,6 @@ fn abs_to_rel_path(abspath: &Path, rel_part: &Path) -> CargoResult<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::strip_rust_affixes;
-    use super::get_template_type;
-    use util::template::TemplateType;
 
     #[test]
     fn affixes_stripped() {
@@ -745,56 +716,5 @@ mod tests {
         assert_eq!(strip_rust_affixes("foo-rs-rs"), "foo-rs");
         // It shouldn't touch the middle
         assert_eq!(strip_rust_affixes("some-rust-crate"), "some-rust-crate");
-    }
-
-    macro_rules! test_get_template_proto {
-        ( $funcname:ident, $url:expr ) => {
-            #[test]
-            fn $funcname() {
-                assert_eq!(get_template_type(Some($url), Some("foo")).unwrap(),
-                TemplateType::GitRepo($url));
-                assert_eq!(get_template_type(Some($url), Some("")).unwrap(),
-                TemplateType::GitRepo($url));
-                assert_eq!(get_template_type(Some($url), None).unwrap(),
-                TemplateType::GitRepo($url));
-            }
-        }
-    }
-
-    test_get_template_proto!(test_get_template_http, "http://foo.com/user/repo");
-    test_get_template_proto!(test_get_template_https, "https://foo.com/user/repo");
-    test_get_template_proto!(test_get_template_file, "file://foo.com/user/repo");
-    test_get_template_proto!(test_get_template_git, "git@foo.com:user/repo");
-
-    #[test]
-    fn test_get_template_type_git_repo_bad_proto_is_local_dir() {
-        // We didn't detect a protocol that we use, so it's treated as a directory.
-        assert_eq!(get_template_type(Some("ftps://foo.com/user/repo"), None).unwrap(),
-                   TemplateType::LocalDir("ftps://foo.com/user/repo"));
-    }
-
-    #[test]
-    fn test_get_template_type_local_dir_abs() {
-        assert_eq!(get_template_type(Some("/foo/user/repo"), Some("foo")).unwrap(),
-                   TemplateType::LocalDir("/foo/user/repo"));
-        assert_eq!(get_template_type(Some("/foo/user/repo"), Some("")).unwrap(),
-                   TemplateType::LocalDir("/foo/user/repo"));
-        assert_eq!(get_template_type(Some("/foo/user/repo"), None).unwrap(),
-                   TemplateType::LocalDir("/foo/user/repo"));
-    }
-
-    #[test]
-    fn test_get_template_type_local_dir_rel() {
-        assert_eq!(get_template_type(Some("foo/user/repo"), Some("foo")).unwrap(),
-                   TemplateType::LocalDir("foo/user/repo"));
-        assert_eq!(get_template_type(Some("foo/user/repo"), Some("")).unwrap(),
-                   TemplateType::LocalDir("foo/user/repo"));
-        assert_eq!(get_template_type(Some("foo/user/repo"), None).unwrap(),
-                   TemplateType::LocalDir("foo/user/repo"));
-    }
-
-    #[test]
-    fn test_get_template_type_builtin() {
-        assert_eq!(get_template_type(None, None).unwrap(), TemplateType::Builtin);
     }
 }
