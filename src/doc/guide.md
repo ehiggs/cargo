@@ -447,7 +447,7 @@ Add the following files:
 [project]
 name = "{{name}}"
 version = "0.1.0"
-authors = [{{{toml-escape author}}}]
+authors = [{{toml-escape author}}]
 ```
 
 ```rust
