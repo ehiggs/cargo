@@ -52,6 +52,8 @@ we need to get started. First, let’s check out `Cargo.toml`:
 name = "hello_world"
 version = "0.1.0"
 authors = ["Your Name <you@example.com>"]
+
+[dependencies]
 ```
 
 This is called a **manifest**, and it contains all of the metadata that Cargo
@@ -445,7 +447,7 @@ Add the following files:
 [project]
 name = "{{name}}"
 version = "0.1.0"
-authors = [{{{authors}}}]
+authors = [{{{toml-escape author}}}]
 ```
 
 ```rust
@@ -466,10 +468,22 @@ $ cargo new proj --template http://your/project/repo
 
 The variables available for use are:
 
-- name: the name of the project
-- authors: the toml formatted name of the project author
+- `name`: the name of the project
+- `authors`: the toml formatted name of the project author
 
 In the future, more variables may be added. Suggestions welcome!
+
+## Available templating functions
+
+The available templating functions are:
+
+- `toml-escape`: Escapes a string for use in a TOML file.
+  file.
+- `html-escape`: Escapes a string for use in a HTML file.
+
+There is more documentation available on the [Handlebars
+website](http://handlebarsjs.com/) though keep in mind that the Rust
+implementation of Handlebars isn't 100% compatible with the Javascript version.
 
 # Further reading
 
