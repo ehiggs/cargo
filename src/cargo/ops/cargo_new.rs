@@ -1,6 +1,6 @@
 use std::env;
 use std::fs::{self, DirEntry, File};
-use std::path::{Path, PathBuf, MAIN_SEPARATOR};
+use std::path::{Path, PathBuf};
 use std::collections::BTreeMap;
 use rustc_serialize::{Decodable, Decoder};
 
@@ -540,8 +540,12 @@ fn collect_template_dir(template_path: &PathBuf, _: &Path) -> CargoResult<Vec<Bo
     // template and render it with the above data to a new file inside the target directory
     try!(walk_template_dir(&template_path, &mut |entry| {
         let entry_path = entry.path();
-        let dest_file_name = try!(abs_to_rel_path(&entry_path, &template_path));
-        templates.push(Box::new(InputFileTemplateFile::new(entry_path, dest_file_name)));
+        let dest_file_name = PathBuf::from(try!(entry_path.strip_prefix(&template_path)
+                                  .chain_error(||
+                                               human(format!("entry is somehow not a subpath \
+                                                             of the directory being walked.")))));
+        templates.push(Box::new(InputFileTemplateFile::new(entry_path, 
+                                                           dest_file_name.to_path_buf())));
         Ok(())
     }));
     Ok(templates)
@@ -682,24 +686,6 @@ String::from("fn main() {
 ")));
     template_files.push(main_file);
     template_files
-}
-
-fn abs_to_rel_path(abspath: &Path, rel_part: &Path) -> CargoResult<PathBuf> {
-    let abspath_str= try!(abspath.to_str().ok_or(
-            human(format!("could not convert path to string: {}", abspath.display()))));
-    let rel_str = try!(rel_part.to_str().ok_or(
-            human(format!("could not convert path to string: {}", rel_part.display()))));
-    // the path we have here is the absolute path to the file in the template directory
-    // we need to trim this down to be just the path from the root of the template.
-    // For example:
-    //    /home/user/.cargo/templates/foo/Cargo.toml => Cargo.toml
-    //    /home/user/.cargo/templates/foo/src/main.rs => src/main.rs
-    //    C:\user\.cargo\templates\foo\src\main.rs => src/main.rs
-    let mut dest_file_name = abspath_str.replace(rel_str, "");
-    if dest_file_name.starts_with(MAIN_SEPARATOR) {
-        dest_file_name.remove(0);
-    }
-    Ok(PathBuf::from(dest_file_name))
 }
 
 #[cfg(test)]
