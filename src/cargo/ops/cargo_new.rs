@@ -496,12 +496,15 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
         }
 
         let parent = try!(dest_path.parent()
-                          .chain_error(||
-                                       human(format!("failed to make sure parent directory \
-                                                    exists for {}", dest_path.display()))));
+                          .chain_error(|| {
+                              human(format!("failed to make sure parent directory \
+                                             exists for {}", dest_path.display()))
+                          }));
         try!(fs::create_dir_all(&parent)
-             .chain_error(|| human(format!("failed to create path to destination file {}", 
-                                           parent.display()))));
+             .chain_error(|| {
+                 human(format!("failed to create path to destination file {}",
+                               parent.display()))
+             }));
 
         // create the new file & render the template to it
         let mut dest_file = try!(File::create(&dest_path).chain_error(|| {
@@ -541,9 +544,10 @@ fn collect_template_dir(template_path: &PathBuf, _: &Path) -> CargoResult<Vec<Bo
     try!(walk_template_dir(&template_path, &mut |entry| {
         let entry_path = entry.path();
         let dest_file_name = PathBuf::from(try!(entry_path.strip_prefix(&template_path)
-                                  .chain_error(||
-                                               human(format!("entry is somehow not a subpath \
-                                                             of the directory being walked.")))));
+                                  .chain_error(|| {
+                                      human(format!("entry is somehow not a subpath \
+                                                     of the directory being walked."))
+                                  })));
         templates.push(Box::new(InputFileTemplateFile::new(entry_path, 
                                                            dest_file_name.to_path_buf())));
         Ok(())
