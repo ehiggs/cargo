@@ -80,9 +80,9 @@ fn clean_multiple_packages() {
                                         .arg("-p").arg("foo"),
                 execs().with_status(0));
 
-    let d1_path = &p.build_dir().join("debug").join("deps")
+    let d1_path = &p.build_dir().join("debug")
                                 .join(format!("d1{}", env::consts::EXE_SUFFIX));
-    let d2_path = &p.build_dir().join("debug").join("deps")
+    let d2_path = &p.build_dir().join("debug")
                                 .join(format!("d2{}", env::consts::EXE_SUFFIX));
 
 
@@ -171,9 +171,9 @@ fn build_script() {
     assert_that(p.cargo("build").arg("-v"),
                 execs().with_status(0).with_stderr("\
 [COMPILING] foo v0.0.1 ([..])
-[RUNNING] `rustc build.rs [..]`
+[RUNNING] `rustc [..] build.rs [..]`
 [RUNNING] `[..]build-script-build`
-[RUNNING] `rustc src[/]main.rs [..]`
+[RUNNING] `rustc [..] src[/]main.rs [..]`
 [FINISHED] debug [unoptimized + debuginfo] target(s) in [..]
 "));
 }

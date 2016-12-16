@@ -1,5 +1,5 @@
 use cargo::core::Workspace;
-use cargo::ops::{self, MessageFormat};
+use cargo::ops::{self, MessageFormat, Packages};
 use cargo::util::{CliResult, Config};
 use cargo::util::important_paths::{find_root_manifest_for_wd};
 
@@ -45,7 +45,7 @@ Options:
     --no-default-features        Do not build the `default` feature
     --target TRIPLE              Build for the target triple
     --manifest-path PATH         Path to the manifest to document
-    -v, --verbose ...            Use verbose output
+    -v, --verbose ...            Use verbose output (-vv very verbose/build.rs output)
     -q, --quiet                  No output printed to stdout
     --color WHEN                 Coloring: auto, always, never
     --message-format FMT         Error format: human, json [default: human]
@@ -80,7 +80,7 @@ pub fn execute(options: Options, config: &Config) -> CliResult<Option<()>> {
             features: &options.flag_features,
             all_features: options.flag_all_features,
             no_default_features: options.flag_no_default_features,
-            spec: &options.flag_package,
+            spec: Packages::Packages(&options.flag_package),
             filter: ops::CompileFilter::new(options.flag_lib,
                                             &options.flag_bin,
                                             &empty,

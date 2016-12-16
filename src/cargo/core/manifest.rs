@@ -6,7 +6,6 @@ use rustc_serialize::{Encoder, Encodable};
 
 use core::{Dependency, PackageId, Summary, SourceId, PackageIdSpec};
 use core::WorkspaceConfig;
-use core::package_id::Metadata;
 
 pub enum EitherManifest {
     Real(Manifest),
@@ -72,7 +71,7 @@ impl LibKind {
             "lib" => LibKind::Lib,
             "rlib" => LibKind::Rlib,
             "dylib" => LibKind::Dylib,
-            "procc-macro" => LibKind::ProcMacro,
+            "proc-macro" => LibKind::ProcMacro,
             s => LibKind::Other(s.to_string()),
         }
     }
@@ -124,7 +123,7 @@ impl Encodable for TargetKind {
     }
 }
 
-#[derive(RustcEncodable, RustcDecodable, Clone, PartialEq, Eq, Debug, Hash)]
+#[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub struct Profile {
     pub opt_level: String,
     pub lto: bool,
@@ -137,7 +136,27 @@ pub struct Profile {
     pub test: bool,
     pub doc: bool,
     pub run_custom_build: bool,
+    pub check: bool,
     pub panic: Option<String>,
+}
+
+#[derive(RustcEncodable)]
+struct SerializedProfile<'a> {
+    opt_level: &'a str,
+    debuginfo: bool,
+    debug_assertions: bool,
+    test: bool,
+}
+
+impl Encodable for Profile {
+    fn encode<S: Encoder>(&self, s: &mut S) -> Result<(), S::Error> {
+        SerializedProfile {
+            opt_level: &self.opt_level,
+            debuginfo: self.debuginfo,
+            debug_assertions: self.debug_assertions,
+            test: self.test,
+        }.encode(s)
+    }
 }
 
 #[derive(Default, Clone, Debug, PartialEq, Eq)]
@@ -150,6 +169,7 @@ pub struct Profiles {
     pub bench_deps: Profile,
     pub doc: Profile,
     pub custom_build: Profile,
+    pub check: Profile,
 }
 
 /// Information about a binary, a library, an example, etc. that is part of the
@@ -159,7 +179,6 @@ pub struct Target {
     kind: TargetKind,
     name: String,
     src_path: PathBuf,
-    metadata: Option<Metadata>,
     tested: bool,
     benched: bool,
     doc: bool,
@@ -279,7 +298,6 @@ impl Target {
             kind: TargetKind::Bin,
             name: String::new(),
             src_path: PathBuf::new(),
-            metadata: None,
             doc: false,
             doctest: false,
             harness: true,
@@ -289,40 +307,35 @@ impl Target {
         }
     }
 
-    pub fn lib_target(name: &str, crate_targets: Vec<LibKind>,
-                      src_path: &Path,
-                      metadata: Metadata) -> Target {
+    pub fn lib_target(name: &str,
+                      crate_targets: Vec<LibKind>,
+                      src_path: &Path) -> Target {
         Target {
             kind: TargetKind::Lib(crate_targets),
             name: name.to_string(),
             src_path: src_path.to_path_buf(),
-            metadata: Some(metadata),
             doctest: true,
             doc: true,
             ..Target::blank()
         }
     }
 
-    pub fn bin_target(name: &str, src_path: &Path,
-                      metadata: Option<Metadata>) -> Target {
+    pub fn bin_target(name: &str, src_path: &Path) -> Target {
         Target {
             kind: TargetKind::Bin,
             name: name.to_string(),
             src_path: src_path.to_path_buf(),
-            metadata: metadata,
             doc: true,
             ..Target::blank()
         }
     }
 
     /// Builds a `Target` corresponding to the `build = "build.rs"` entry.
-    pub fn custom_build_target(name: &str, src_path: &Path,
-                               metadata: Option<Metadata>) -> Target {
+    pub fn custom_build_target(name: &str, src_path: &Path) -> Target {
         Target {
             kind: TargetKind::CustomBuild,
             name: name.to_string(),
             src_path: src_path.to_path_buf(),
-            metadata: metadata,
             for_host: true,
             benched: false,
             tested: false,
@@ -340,25 +353,21 @@ impl Target {
         }
     }
 
-    pub fn test_target(name: &str, src_path: &Path,
-                       metadata: Metadata) -> Target {
+    pub fn test_target(name: &str, src_path: &Path) -> Target {
         Target {
             kind: TargetKind::Test,
             name: name.to_string(),
             src_path: src_path.to_path_buf(),
-            metadata: Some(metadata),
             benched: false,
             ..Target::blank()
         }
     }
 
-    pub fn bench_target(name: &str, src_path: &Path,
-                        metadata: Metadata) -> Target {
+    pub fn bench_target(name: &str, src_path: &Path) -> Target {
         Target {
             kind: TargetKind::Bench,
             name: name.to_string(),
             src_path: src_path.to_path_buf(),
-            metadata: Some(metadata),
             tested: false,
             ..Target::blank()
         }
@@ -367,7 +376,6 @@ impl Target {
     pub fn name(&self) -> &str { &self.name }
     pub fn crate_name(&self) -> String { self.name.replace("-", "_") }
     pub fn src_path(&self) -> &Path { &self.src_path }
-    pub fn metadata(&self) -> Option<&Metadata> { self.metadata.as_ref() }
     pub fn kind(&self) -> &TargetKind { &self.kind }
     pub fn tested(&self) -> bool { self.tested }
     pub fn harness(&self) -> bool { self.harness }
@@ -391,6 +399,13 @@ impl Target {
     pub fn is_lib(&self) -> bool {
         match self.kind {
             TargetKind::Lib(_) => true,
+            _ => false
+        }
+    }
+
+    pub fn is_dylib(&self) -> bool {
+        match self.kind {
+            TargetKind::Lib(ref libs) => libs.iter().any(|l| *l == LibKind::Dylib),
             _ => false
         }
     }
@@ -518,6 +533,13 @@ impl Profile {
             ..Profile::default_dev()
         }
     }
+
+    pub fn default_check() -> Profile {
+        Profile {
+            check: true,
+            ..Profile::default_dev()
+        }
+    }
 }
 
 impl Default for Profile {
@@ -534,6 +556,7 @@ impl Default for Profile {
             test: false,
             doc: false,
             run_custom_build: false,
+            check: false,
             panic: None,
         }
     }
@@ -547,6 +570,8 @@ impl fmt::Display for Profile {
             write!(f, "Profile(doc)")
         } else if self.run_custom_build {
             write!(f, "Profile(run)")
+        } else if self.check {
+            write!(f, "Profile(check)")
         } else {
             write!(f, "Profile(build)")
         }

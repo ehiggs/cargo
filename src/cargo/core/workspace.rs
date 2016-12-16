@@ -242,8 +242,8 @@ impl<'cfg> Workspace<'cfg> {
         while let Some(path) = cur {
             let manifest = path.join("Cargo.toml");
             debug!("find_root - trying {}", manifest.display());
-            if let Ok(pkg) = self.packages.load(&manifest) {
-                match *pkg.workspace_config() {
+            if manifest.exists() {
+                match *self.packages.load(&manifest)?.workspace_config() {
                     WorkspaceConfig::Root { .. } => {
                         debug!("find_root - found");
                         return Ok(Some(manifest))
@@ -450,6 +450,7 @@ impl<'cfg> Workspace<'cfg> {
                 bench_deps: Profile::default_release(),
                 doc: Profile::default_doc(),
                 custom_build: Profile::default_custom_build(),
+                check: Profile::default_check(),
             };
 
             for pkg in self.members().filter(|p| p.manifest_path() != root_manifest) {

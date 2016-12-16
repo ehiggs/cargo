@@ -625,6 +625,28 @@ fn virtual_works() {
 }
 
 #[test]
+fn explicit_package_argument_works_with_virtual_manifest() {
+    let p = project("foo")
+        .file("Cargo.toml", r#"
+            [workspace]
+            members = ["bar"]
+        "#)
+        .file("bar/Cargo.toml", r#"
+            [project]
+            name = "bar"
+            version = "0.1.0"
+            authors = []
+        "#)
+        .file("bar/src/main.rs", "fn main() {}");
+    p.build();
+    assert_that(p.cargo("build").cwd(p.root()).args(&["--package", "bar"]),
+                execs().with_status(0));
+    assert_that(&p.root().join("Cargo.lock"), existing_file());
+    assert_that(&p.bin("bar"), existing_file());
+    assert_that(&p.root().join("bar/Cargo.lock"), is_not(existing_file()));
+}
+
+#[test]
 fn virtual_misconfigure() {
     let p = project("foo")
         .file("Cargo.toml", r#"
@@ -652,6 +674,29 @@ manifest located at: [..]
 
 #[test]
 fn virtual_build() {
+    let p = project("foo")
+        .file("Cargo.toml", r#"
+            [workspace]
+            members = ["bar"]
+        "#)
+        .file("bar/Cargo.toml", r#"
+            [project]
+            name = "bar"
+            version = "0.1.0"
+            authors = []
+        "#)
+        .file("bar/src/main.rs", "fn main() {}");
+    p.build();
+    assert_that(p.cargo("build"),
+                execs().with_status(101)
+                       .with_stderr("\
+error: manifest path `[..]` is a virtual manifest, but this command \
+requires running against an actual package in this workspace
+"));
+}
+
+#[test]
+fn virtual_build_no_members() {
     let p = project("foo")
         .file("Cargo.toml", r#"
             [workspace]
@@ -1009,4 +1054,23 @@ fn workspace_with_transitive_dev_deps() {
 
     assert_that(p.cargo("test").args(&["-p", "bar"]),
                 execs().with_status(0));
+}
+
+#[test]
+fn error_if_parent_cargo_toml_is_invalid() {
+    let p = project("foo")
+        .file("Cargo.toml", "Totally not a TOML file")
+        .file("bar/Cargo.toml", r#"
+            [project]
+            name = "bar"
+            version = "0.1.0"
+            authors = []
+        "#)
+        .file("bar/src/main.rs", "fn main() {}");
+    p.build();
+
+    assert_that(p.cargo("build").cwd(p.root().join("bar")),
+                execs().with_status(101)
+                       .with_stderr_contains("\
+[ERROR] failed to parse manifest at `[..]`"));
 }

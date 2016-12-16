@@ -1,23 +1,26 @@
+#![allow(deprecated)]
+
 use std::collections::{HashSet, HashMap, BTreeSet};
 use std::env;
+use std::fmt;
+use std::hash::{Hasher, Hash, SipHasher};
 use std::path::{Path, PathBuf};
 use std::str::{self, FromStr};
 use std::sync::Arc;
 
-
 use core::{Package, PackageId, PackageSet, Resolve, Target, Profile};
-use core::{TargetKind, Profiles, Metadata, Dependency, Workspace};
+use core::{TargetKind, Profiles, Dependency, Workspace};
 use core::dependency::Kind as DepKind;
-use util::{CargoResult, ChainError, internal, Config, profile, Cfg, human};
+use util::{self, CargoResult, ChainError, internal, Config, profile, Cfg, human};
 
 use super::TargetConfig;
 use super::custom_build::{BuildState, BuildScripts};
 use super::fingerprint::Fingerprint;
-use super::layout::{Layout, LayoutProxy};
+use super::layout::Layout;
 use super::links::Links;
 use super::{Kind, Compilation, BuildConfig};
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub struct Unit<'a> {
     pub pkg: &'a Package,
     pub target: &'a Target,
@@ -26,9 +29,9 @@ pub struct Unit<'a> {
 }
 
 pub struct Context<'a, 'cfg: 'a> {
+    pub ws: &'a Workspace<'cfg>,
     pub config: &'cfg Config,
     pub resolve: &'a Resolve,
-    pub current_package: PackageId,
     pub compilation: Compilation<'cfg>,
     pub packages: &'a PackageSet<'cfg>,
     pub build_state: Arc<BuildState>,
@@ -53,8 +56,11 @@ struct TargetInfo {
     cfg: Option<Vec<Cfg>>,
 }
 
+#[derive(Clone)]
+pub struct Metadata(u64);
+
 impl<'a, 'cfg> Context<'a, 'cfg> {
-    pub fn new(ws: &Workspace<'cfg>,
+    pub fn new(ws: &'a Workspace<'cfg>,
                resolve: &'a Resolve,
                packages: &'a PackageSet<'cfg>,
                config: &'cfg Config,
@@ -64,18 +70,15 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
         let dest = if build_config.release { "release" } else { "debug" };
         let host_layout = Layout::new(ws, None, &dest)?;
         let target_layout = match build_config.requested_target.as_ref() {
-            Some(target) => {
-                Some(Layout::new(ws, Some(&target), &dest)?)
-            }
+            Some(target) => Some(Layout::new(ws, Some(&target), dest)?),
             None => None,
         };
 
-        let current_package = ws.current()?.package_id().clone();
         Ok(Context {
+            ws: ws,
             host: host_layout,
             target: target_layout,
             resolve: resolve,
-            current_package: current_package,
             packages: packages,
             config: config,
             target_info: TargetInfo::default(),
@@ -143,6 +146,9 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
                         unit: &Unit<'a>,
                         crate_types: &mut BTreeSet<String>)
                         -> CargoResult<()> {
+        if unit.profile.check {
+            crate_types.insert("metadata".to_string());
+        }
         for target in unit.pkg.manifest().targets() {
             crate_types.extend(target.rustc_crate_types().iter().map(|s| {
                 if *s == "lib" {
@@ -168,13 +174,17 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
                                       "RUSTFLAGS")?;
         let mut process = self.config.rustc()?.process();
         process.arg("-")
-               .arg("--crate-name").arg("_")
+               .arg("--crate-name").arg("___")
                .arg("--print=file-names")
                .args(&rustflags)
                .env_remove("RUST_LOG");
 
         for crate_type in crate_types {
-            process.arg("--crate-type").arg(crate_type);
+            // Here and below we'll skip the metadata crate-type because it is
+            // not supported by older compilers. We'll do this one manually.
+            if crate_type != "metadata" {
+                process.arg("--crate-type").arg(crate_type);
+            }
         }
         if kind == Kind::Target {
             process.arg("--target").arg(&self.target_triple());
@@ -198,27 +208,37 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
         let mut map = HashMap::new();
         for crate_type in crate_types {
             let not_supported = error.lines().any(|line| {
-                line.contains("unsupported crate type") &&
-                    line.contains(crate_type)
+                (line.contains("unsupported crate type") ||
+                 line.contains("unknown crate type")) &&
+                line.contains(crate_type)
             });
             if not_supported {
                 map.insert(crate_type.to_string(), None);
-                continue
+                continue;
+            }
+            if crate_type == "metadata" {
+                continue;
             }
             let line = match lines.next() {
                 Some(line) => line,
                 None => bail!("malformed output when learning about \
                                target-specific information from rustc"),
             };
-            let mut parts = line.trim().split('_');
+            let mut parts = line.trim().split("___");
             let prefix = parts.next().unwrap();
             let suffix = match parts.next() {
                 Some(part) => part,
                 None => bail!("output of --print=file-names has changed in \
                                the compiler, cannot parse"),
             };
-            map.insert(crate_type.to_string(),
-                       Some((prefix.to_string(), suffix.to_string())));
+
+            map.insert(crate_type.to_string(), Some((prefix.to_string(), suffix.to_string())));
+        }
+ 
+        // Manually handle the metadata case. If it is not supported by the
+        // compiler we'll error out elsewhere.
+        if crate_types.contains("metadata") {
+            map.insert("metadata".to_string(), Some(("lib".to_owned(), ".rmeta".to_owned())));
         }
 
         let cfg = if has_cfg {
@@ -246,8 +266,8 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
         let mut visited = HashSet::new();
         for unit in units {
             self.walk_used_in_plugin_map(unit,
-                                              unit.target.for_host(),
-                                              &mut visited)?;
+                                         unit.target.for_host(),
+                                         &mut visited)?;
         }
         Ok(())
     }
@@ -265,30 +285,72 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
         }
         for unit in self.dep_targets(unit)? {
             self.walk_used_in_plugin_map(&unit,
-                                              is_plugin || unit.target.for_host(),
-                                              visited)?;
+                                         is_plugin || unit.target.for_host(),
+                                         visited)?;
         }
         Ok(())
     }
 
     /// Returns the appropriate directory layout for either a plugin or not.
-    pub fn layout(&self, unit: &Unit) -> LayoutProxy {
-        let primary = unit.pkg.package_id() == &self.current_package;
-        match unit.kind {
-            Kind::Host => LayoutProxy::new(&self.host, primary),
-            Kind::Target => LayoutProxy::new(self.target.as_ref()
-                                                 .unwrap_or(&self.host),
-                                             primary),
+    fn layout(&self, kind: Kind) -> &Layout {
+        match kind {
+            Kind::Host => &self.host,
+            Kind::Target => self.target.as_ref().unwrap_or(&self.host)
         }
+    }
+
+    /// Returns the directories where Rust crate dependencies are found for the
+    /// specified unit.
+    pub fn deps_dir(&self, unit: &Unit) -> &Path {
+        self.layout(unit.kind).deps()
+    }
+
+    /// Returns the directory for the specified unit where fingerprint
+    /// information is stored.
+    pub fn fingerprint_dir(&mut self, unit: &Unit) -> PathBuf {
+        let dir = self.pkg_dir(unit);
+        self.layout(unit.kind).fingerprint().join(dir)
+    }
+
+    /// Returns the appropriate directory layout for either a plugin or not.
+    pub fn build_script_dir(&mut self, unit: &Unit) -> PathBuf {
+        assert!(unit.target.is_custom_build());
+        assert!(!unit.profile.run_custom_build);
+        let dir = self.pkg_dir(unit);
+        self.layout(Kind::Host).build().join(dir)
+    }
+
+    /// Returns the appropriate directory layout for either a plugin or not.
+    pub fn build_script_out_dir(&mut self, unit: &Unit) -> PathBuf {
+        assert!(unit.target.is_custom_build());
+        assert!(unit.profile.run_custom_build);
+        let dir = self.pkg_dir(unit);
+        self.layout(unit.kind).build().join(dir).join("out")
+    }
+
+    pub fn host_deps(&self) -> &Path {
+        self.host.deps()
     }
 
     /// Returns the appropriate output directory for the specified package and
     /// target.
-    pub fn out_dir(&self, unit: &Unit) -> PathBuf {
+    pub fn out_dir(&mut self, unit: &Unit) -> PathBuf {
         if unit.profile.doc {
-            self.layout(unit).doc_root()
+            self.layout(unit.kind).root().parent().unwrap().join("doc")
+        } else if unit.target.is_custom_build() {
+            self.build_script_dir(unit)
+        } else if unit.target.is_example() {
+            self.layout(unit.kind).examples().to_path_buf()
         } else {
-            self.layout(unit).out_dir(unit)
+            self.deps_dir(unit).to_path_buf()
+        }
+    }
+
+    fn pkg_dir(&mut self, unit: &Unit) -> String {
+        let name = unit.pkg.package_id().name();
+        match self.target_metadata(unit) {
+            Some(meta) => format!("{}-{}", name, meta),
+            None => format!("{}-{}", name, util::short_hash(unit.pkg)),
         }
     }
 
@@ -308,71 +370,129 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
     }
 
     /// Get the metadata for a target in a specific profile
-    pub fn target_metadata(&self, unit: &Unit) -> Option<Metadata> {
-        let metadata = unit.target.metadata();
-        if unit.target.is_lib() && unit.profile.test {
-            // Libs and their tests are built in parallel, so we need to make
-            // sure that their metadata is different.
-            metadata.cloned().map(|mut m| {
-                m.mix(&"test");
-                m
-            })
-        } else if unit.target.is_bin() && unit.profile.test {
-            // Make sure that the name of this test executable doesn't
-            // conflict with a library that has the same name and is
-            // being tested
-            let mut metadata = unit.pkg.generate_metadata();
-            metadata.mix(&format!("bin-{}", unit.target.name()));
-            Some(metadata)
-        } else if unit.pkg.package_id().source_id().is_path() &&
-                  !unit.profile.test {
-            // If we're not building a unit test but we're building a path
-            // dependency, then we're likely compiling the "current package" or
-            // some package in a workspace. In this situation we pass no
-            // metadata by default so we'll have predictable
-            // file names like `target/debug/libfoo.{a,so,rlib}` and such.
-            //
-            // Note, though, that the compiler's build system at least wants
-            // path dependencies to have hashes in filenames. To account for
-            // that we have an extra hack here which reads the
-            // `__CARGO_DEFAULT_METADATA` environment variable and creates a
-            // hash in the filename if that's present.
-            //
-            // This environment variable should not be relied on! It's basically
-            // just here for rustbuild. We need a more principled method of
-            // doing this eventually.
-            if unit.target.is_lib() {
-                env::var("__CARGO_DEFAULT_LIB_METADATA").ok().map(|meta| {
-                    let mut metadata = unit.pkg.generate_metadata();
-                    metadata.mix(&meta);
-                    metadata
-                })
-            } else {
-                None
+    /// We build to the path: "{filename}-{target_metadata}"
+    /// We use a linking step to link/copy to a predictable filename
+    /// like `target/debug/libfoo.{a,so,rlib}` and such.
+    pub fn target_metadata(&mut self, unit: &Unit) -> Option<Metadata> {
+        // No metadata for dylibs because of a couple issues
+        // - OSX encodes the dylib name in the executable
+        // - Windows rustc multiple files of which we can't easily link all of them
+        //
+        // Two expeptions
+        // 1) Upstream dependencies (we aren't exporting + need to resolve name conflict)
+        // 2) __CARGO_DEFAULT_LIB_METADATA env var
+        //
+        // Note, though, that the compiler's build system at least wants
+        // path dependencies (eg libstd) to have hashes in filenames. To account for
+        // that we have an extra hack here which reads the
+        // `__CARGO_DEFAULT_METADATA` environment variable and creates a
+        // hash in the filename if that's present.
+        //
+        // This environment variable should not be relied on! It's
+        // just here for rustbuild. We need a more principled method
+        // doing this eventually.
+        if !unit.profile.test &&
+            unit.target.is_dylib() &&
+            unit.pkg.package_id().source_id().is_path() &&
+            !env::var("__CARGO_DEFAULT_LIB_METADATA").is_ok() {
+            return None;
+        }
+
+        let mut hasher = SipHasher::new_with_keys(0, 0);
+
+        // Unique metadata per (name, source, version) triple. This'll allow us
+        // to pull crates from anywhere w/o worrying about conflicts
+        unit.pkg.package_id().hash(&mut hasher);
+
+        // Also mix in enabled features to our metadata. This'll ensure that
+        // when changing feature sets each lib is separately cached.
+        match self.resolve.features(unit.pkg.package_id()) {
+            Some(features) => {
+                let mut feat_vec: Vec<&String> = features.iter().collect();
+                feat_vec.sort();
+                feat_vec.hash(&mut hasher);
             }
-        } else {
-            metadata.cloned()
+            None => Vec::<&String>::new().hash(&mut hasher),
+        }
+
+        // Throw in the profile we're compiling with. This helps caching
+        // panic=abort and panic=unwind artifacts, additionally with various
+        // settings like debuginfo and whatnot.
+        unit.profile.hash(&mut hasher);
+
+        // Finally throw in the target name/kind. This ensures that concurrent
+        // compiles of targets in the same crate don't collide.
+        unit.target.name().hash(&mut hasher);
+        unit.target.kind().hash(&mut hasher);
+
+        Some(Metadata(hasher.finish()))
+    }
+
+    /// Returns the file stem for a given target/profile combo (with metadata)
+    pub fn file_stem(&mut self, unit: &Unit) -> String {
+        match self.target_metadata(unit) {
+            Some(ref metadata) => format!("{}-{}", unit.target.crate_name(),
+                                          metadata),
+            None => self.bin_stem(unit),
         }
     }
 
-    /// Returns the file stem for a given target/profile combo
-    pub fn file_stem(&self, unit: &Unit) -> String {
-        match self.target_metadata(unit) {
-            Some(ref metadata) => format!("{}{}", unit.target.crate_name(),
-                                          metadata.extra_filename),
-            None if unit.target.allows_underscores() => {
-                unit.target.name().to_string()
+    /// Returns the bin stem for a given target (without metadata)
+    fn bin_stem(&self, unit: &Unit) -> String {
+        if unit.target.allows_underscores() {
+            unit.target.name().to_string()
+        } else {
+            unit.target.crate_name()
+        }
+    }
+
+    /// Returns a tuple with the directory and name of the hard link we expect
+    /// our target to be copied to. Eg, file_stem may be out_dir/deps/foo-abcdef
+    /// and link_stem would be out_dir/foo
+    /// This function returns it in two parts so the caller can add prefix/suffis
+    /// to filename separately
+
+    /// Returns an Option because in some cases we don't want to link
+    /// (eg a dependent lib)
+    pub fn link_stem(&mut self, unit: &Unit) -> Option<(PathBuf, String)> {
+        let src_dir = self.out_dir(unit);
+        let bin_stem = self.bin_stem(unit);
+        let file_stem = self.file_stem(unit);
+
+        // We currently only lift files up from the `deps` directory. If
+        // it was compiled into something like `example/` or `doc/` then
+        // we don't want to link it up.
+        if src_dir.ends_with("deps") {
+            // Don't lift up library dependencies
+            if self.ws.members().find(|&p| p != unit.pkg).is_some() && !unit.target.is_bin() {
+                None
+            } else {
+                Some((
+                    src_dir.parent().unwrap().to_owned(),
+                    if unit.profile.test {file_stem} else {bin_stem},
+                ))
             }
-            None => unit.target.crate_name(),
+        } else if bin_stem == file_stem {
+            None
+        } else if src_dir.ends_with("examples") {
+            Some((src_dir, bin_stem))
+        } else if src_dir.parent().unwrap().ends_with("build") {
+            Some((src_dir, bin_stem))
+        } else {
+            None
         }
     }
 
     /// Return the filenames that the given target for the given profile will
-    /// generate, along with whether you can link against that file (e.g. it's a
-    /// library).
-    pub fn target_filenames(&self, unit: &Unit)
-                            -> CargoResult<Vec<(String, bool)>> {
+    /// generate as a list of 3-tuples (filename, link_dst, linkable)
+    /// filename: filename rustc compiles to. (Often has metadata suffix).
+    /// link_dst: Optional file to link/copy the result to (without metadata suffix)
+    /// linkable: Whether possible to link against file (eg it's a library)
+    pub fn target_filenames(&mut self, unit: &Unit)
+                            -> CargoResult<Vec<(PathBuf, Option<PathBuf>, bool)>> {
+        let out_dir = self.out_dir(unit);
         let stem = self.file_stem(unit);
+        let link_stem = self.link_stem(unit);
         let info = if unit.target.for_host() {
             &self.host_info
         } else {
@@ -386,8 +506,11 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
                 let crate_type = if crate_type == "lib" {"rlib"} else {crate_type};
                 match info.crate_types.get(crate_type) {
                     Some(&Some((ref prefix, ref suffix))) => {
-                        ret.push((format!("{}{}{}", prefix, stem, suffix),
-                                  linkable));
+                        let filename = out_dir.join(format!("{}{}{}", prefix, stem, suffix));
+                        let link_dst = link_stem.clone().map(|(ld, ls)| {
+                            ld.join(format!("{}{}{}", prefix, ls, suffix))
+                        });
+                        ret.push((filename, link_dst, linkable));
                         Ok(())
                     }
                     // not supported, don't worry about it
@@ -401,20 +524,25 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
                     }
                 }
             };
-            match *unit.target.kind() {
-                TargetKind::Example |
-                TargetKind::Bin |
-                TargetKind::CustomBuild |
-                TargetKind::Bench |
-                TargetKind::Test => {
-                    add("bin", false)?;
-                }
-                TargetKind::Lib(..) if unit.profile.test => {
-                    add("bin", false)?;
-                }
-                TargetKind::Lib(ref libs) => {
-                    for lib in libs {
-                        add(lib.crate_type(), lib.linkable())?;
+
+            if unit.profile.check {
+                add("metadata", true)?;
+            } else {
+                match *unit.target.kind() {
+                    TargetKind::Example |
+                    TargetKind::Bin |
+                    TargetKind::CustomBuild |
+                    TargetKind::Bench |
+                    TargetKind::Test => {
+                        add("bin", false)?;
+                    }
+                    TargetKind::Lib(..) if unit.profile.test => {
+                        add("bin", false)?;
+                    }
+                    TargetKind::Lib(ref libs) => {
+                        for lib in libs {
+                            add(lib.crate_type(), lib.linkable())?;
+                        }
                     }
                 }
             }
@@ -429,6 +557,7 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
                    support any of the output crate types",
                   unit.pkg, self.target_triple());
         }
+        info!("Target filenames: {:?}", ret);
         Ok(ret)
     }
 
@@ -484,12 +613,20 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
             match self.get_package(id) {
                 Ok(pkg) => {
                     pkg.targets().iter().find(|t| t.is_lib()).map(|t| {
-                        Ok(Unit {
+                        let profile = if unit.profile.check &&
+                                         !t.is_custom_build()
+                                         && !t.for_host() {
+                            &self.profiles.check
+                        } else {
+                            self.lib_profile()
+                        };
+                        let unit = Unit {
                             pkg: pkg,
                             target: t,
-                            profile: self.lib_profile(id),
+                            profile: profile,
                             kind: unit.kind.for_target(t),
-                        })
+                        };
+                        Ok(unit)
                     })
                 }
                 Err(e) => Some(Err(e))
@@ -520,7 +657,7 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
                 Unit {
                     pkg: unit.pkg,
                     target: t,
-                    profile: self.lib_profile(id),
+                    profile: self.lib_profile(),
                     kind: unit.kind.for_target(t),
                 }
             }));
@@ -597,7 +734,7 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
             ret.push(Unit {
                 pkg: dep,
                 target: lib,
-                profile: self.lib_profile(dep.package_id()),
+                profile: self.lib_profile(),
                 kind: unit.kind.for_target(lib),
             });
             if self.build_config.doc_all {
@@ -643,7 +780,7 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
             Unit {
                 pkg: unit.pkg,
                 target: t,
-                profile: self.lib_profile(unit.pkg.package_id()),
+                profile: self.lib_profile(),
                 kind: unit.kind.for_target(t),
             }
         })
@@ -698,7 +835,7 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
     /// Number of jobs specified for this build
     pub fn jobs(&self) -> u32 { self.build_config.jobs }
 
-    pub fn lib_profile(&self, _pkg: &PackageId) -> &'a Profile {
+    pub fn lib_profile(&self) -> &'a Profile {
         let (normal, test) = if self.build_config.release {
             (&self.profiles.release, &self.profiles.bench_deps)
         } else {
@@ -711,10 +848,10 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
         }
     }
 
-    pub fn build_script_profile(&self, pkg: &PackageId) -> &'a Profile {
+    pub fn build_script_profile(&self, _pkg: &PackageId) -> &'a Profile {
         // TODO: should build scripts always be built with the same library
         //       profile? How is this controlled at the CLI layer?
-        self.lib_profile(pkg)
+        self.lib_profile()
     }
 
     pub fn rustflags_args(&self, unit: &Unit) -> CargoResult<Vec<String>> {
@@ -726,8 +863,7 @@ impl<'a, 'cfg> Context<'a, 'cfg> {
     }
 
     pub fn show_warnings(&self, pkg: &PackageId) -> bool {
-        pkg == &self.current_package || pkg.source_id().is_path() ||
-            self.config.extra_verbose()
+        pkg.source_id().is_path() || self.config.extra_verbose()
     }
 }
 
@@ -779,17 +915,23 @@ fn env_args(config: &Config,
     // Then the target.*.rustflags value
     let target = build_config.requested_target.as_ref().unwrap_or(&build_config.host_triple);
     let key = format!("target.{}.{}", target, name);
-    if let Some(args) = config.get_list(&key)? {
-        let args = args.val.into_iter().map(|a| a.0);
+    if let Some(args) = config.get_list_or_split_string(&key)? {
+        let args = args.val.into_iter();
         return Ok(args.collect());
     }
 
     // Then the build.rustflags value
     let key = format!("build.{}", name);
-    if let Some(args) = config.get_list(&key)? {
-        let args = args.val.into_iter().map(|a| a.0);
+    if let Some(args) = config.get_list_or_split_string(&key)? {
+        let args = args.val.into_iter();
         return Ok(args.collect());
     }
 
     Ok(Vec::new())
+}
+
+impl fmt::Display for Metadata {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:016x}", self.0)
+    }
 }

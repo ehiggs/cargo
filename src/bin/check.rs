@@ -29,27 +29,27 @@ pub struct Options {
 }
 
 pub const USAGE: &'static str = "
-Compile a local package and all of its dependencies
+Check a local package and all of its dependencies for errors
 
 Usage:
-    cargo build [options]
+    cargo check [options]
 
 Options:
     -h, --help                   Print this message
-    -p SPEC, --package SPEC ...  Package to build
+    -p SPEC, --package SPEC ...  Package to check
     -j N, --jobs N               Number of parallel jobs, defaults to # of CPUs
-    --lib                        Build only this package's library
-    --bin NAME                   Build only the specified binary
-    --example NAME               Build only the specified example
-    --test NAME                  Build only the specified test target
-    --bench NAME                 Build only the specified benchmark target
-    --release                    Build artifacts in release mode, with optimizations
-    --features FEATURES          Space-separated list of features to also build
-    --all-features               Build all available features
-    --no-default-features        Do not build the `default` feature
-    --target TRIPLE              Build for the target triple
+    --lib                        Check only this package's library
+    --bin NAME                   Check only the specified binary
+    --example NAME               Check only the specified example
+    --test NAME                  Check only the specified test target
+    --bench NAME                 Check only the specified benchmark target
+    --release                    Check artifacts in release mode, with optimizations
+    --features FEATURES          Space-separated list of features to also check
+    --all-features               Check all available features
+    --no-default-features        Do not check the `default` feature
+    --target TRIPLE              Check for the target triple
     --manifest-path PATH         Path to the manifest to compile
-    -v, --verbose ...            Use verbose output (-vv very verbose/build.rs output)
+    -v, --verbose ...            Use verbose output
     -q, --quiet                  No output printed to stdout
     --color WHEN                 Coloring: auto, always, never
     --message-format FMT         Error format: human, json [default: human]
@@ -67,7 +67,7 @@ the --release flag will use the `release` profile instead.
 ";
 
 pub fn execute(options: Options, config: &Config) -> CliResult<Option<()>> {
-    debug!("executing; cmd=cargo-build; args={:?}",
+    debug!("executing; cmd=cargo-check; args={:?}",
            env::args().collect::<Vec<_>>());
     config.configure(options.flag_verbose,
                      options.flag_quiet,
@@ -85,7 +85,7 @@ pub fn execute(options: Options, config: &Config) -> CliResult<Option<()>> {
         all_features: options.flag_all_features,
         no_default_features: options.flag_no_default_features,
         spec: ops::Packages::Packages(&options.flag_package),
-        mode: ops::CompileMode::Build,
+        mode: ops::CompileMode::Check,
         release: options.flag_release,
         filter: ops::CompileFilter::new(options.flag_lib,
                                         &options.flag_bin,

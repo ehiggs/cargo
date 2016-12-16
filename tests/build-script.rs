@@ -33,7 +33,7 @@ fn custom_build_script_failed() {
                 execs().with_status(101)
                        .with_stderr(&format!("\
 [COMPILING] foo v0.5.0 ({url})
-[RUNNING] `rustc build.rs --crate-name build_script_build --crate-type bin [..]`
+[RUNNING] `rustc --crate-name build_script_build build.rs --crate-type bin [..]`
 [RUNNING] `[..][/]build-script-build`
 [ERROR] failed to run custom build command for `foo v0.5.0 ({url})`
 process didn't exit successfully: `[..][/]build-script-build` (exit code: 101)",
@@ -184,7 +184,7 @@ fn custom_build_script_rustc_flags() {
                 execs().with_status(101)
                        .with_stderr(&format!("\
 [COMPILING] bar v0.5.0 ({url})
-[RUNNING] `rustc {dir}{sep}src{sep}lib.rs --crate-name test --crate-type lib -g \
+[RUNNING] `rustc --crate-name test {dir}{sep}src{sep}lib.rs --crate-type lib -g \
         -C metadata=[..] \
         -C extra-filename=-[..] \
         --out-dir {dir}{sep}target \
@@ -306,7 +306,7 @@ fn overrides_and_links() {
 [..]
 [..]
 [..]
-[RUNNING] `rustc [..] --crate-name foo [..] -L foo -L bar[..]`
+[RUNNING] `rustc --crate-name foo [..] -L foo -L bar[..]`
 [FINISHED] debug [unoptimized + debuginfo] target(s) in [..]
 "));
 }
@@ -408,7 +408,7 @@ fn only_rerun_build_script() {
                        .with_stderr("\
 [COMPILING] foo v0.5.0 (file://[..])
 [RUNNING] `[..][/]build-script-build`
-[RUNNING] `rustc [..] --crate-name foo [..]`
+[RUNNING] `rustc --crate-name foo [..]`
 [FINISHED] debug [unoptimized + debuginfo] target(s) in [..]
 "));
 }
@@ -496,8 +496,8 @@ fn testing_and_such() {
                        .with_stderr("\
 [COMPILING] foo v0.5.0 (file://[..])
 [RUNNING] `[..][/]build-script-build`
-[RUNNING] `rustc [..] --crate-name foo [..]`
-[RUNNING] `rustc [..] --crate-name foo [..]`
+[RUNNING] `rustc --crate-name foo [..]`
+[RUNNING] `rustc --crate-name foo [..]`
 [FINISHED] debug [unoptimized + debuginfo] target(s) in [..]
 [RUNNING] `[..][/]foo-[..][EXE]`
 [DOCTEST] foo
@@ -582,9 +582,9 @@ fn propagation_of_l_flags() {
     assert_that(p.cargo_process("build").arg("-v").arg("-j1"),
                 execs().with_status(0)
                        .with_stderr_contains("\
-[RUNNING] `rustc [..] --crate-name a [..]-L bar[..]-L foo[..]`
+[RUNNING] `rustc --crate-name a [..] -L bar[..]-L foo[..]`
 [COMPILING] foo v0.5.0 (file://[..])
-[RUNNING] `rustc [..] --crate-name foo [..] -L bar -L foo`
+[RUNNING] `rustc --crate-name foo [..] -L bar -L foo`
 "));
 }
 
@@ -636,9 +636,9 @@ fn propagation_of_l_flags_new() {
     assert_that(p.cargo_process("build").arg("-v").arg("-j1"),
                 execs().with_status(0)
                        .with_stderr_contains("\
-[RUNNING] `rustc [..] --crate-name a [..]-L bar[..]-L foo[..]`
+[RUNNING] `rustc --crate-name a [..] -L bar[..]-L foo[..]`
 [COMPILING] foo v0.5.0 (file://[..])
-[RUNNING] `rustc [..] --crate-name foo [..] -L bar -L foo`
+[RUNNING] `rustc --crate-name foo [..] -L bar -L foo`
 "));
 }
 
@@ -671,11 +671,11 @@ fn build_deps_simple() {
                 execs().with_status(0)
                        .with_stderr("\
 [COMPILING] a v0.5.0 (file://[..])
-[RUNNING] `rustc [..] --crate-name a [..]`
+[RUNNING] `rustc --crate-name a [..]`
 [COMPILING] foo v0.5.0 (file://[..])
-[RUNNING] `rustc build.rs [..] --extern a=[..]`
+[RUNNING] `rustc [..] build.rs [..] --extern a=[..]`
 [RUNNING] `[..][/]foo-[..][/]build-script-build`
-[RUNNING] `rustc [..] --crate-name foo [..]`
+[RUNNING] `rustc --crate-name foo [..]`
 [FINISHED] debug [unoptimized + debuginfo] target(s) in [..]
 "));
 }
@@ -761,21 +761,21 @@ fn build_cmd_with_a_build_cmd() {
                 execs().with_status(0)
                        .with_stderr("\
 [COMPILING] b v0.5.0 (file://[..])
-[RUNNING] `rustc [..] --crate-name b [..]`
+[RUNNING] `rustc --crate-name b [..]`
 [COMPILING] a v0.5.0 (file://[..])
-[RUNNING] `rustc a[/]build.rs [..] --extern b=[..]`
+[RUNNING] `rustc [..] a[/]build.rs [..] --extern b=[..]`
 [RUNNING] `[..][/]a-[..][/]build-script-build`
-[RUNNING] `rustc [..]lib.rs --crate-name a --crate-type lib -g \
+[RUNNING] `rustc --crate-name a [..]lib.rs --crate-type lib -g \
     -C metadata=[..] \
     --out-dir [..]target[/]debug[/]deps --emit=dep-info,link \
     -L [..]target[/]debug[/]deps`
 [COMPILING] foo v0.5.0 (file://[..])
-[RUNNING] `rustc build.rs --crate-name build_script_build --crate-type bin \
+[RUNNING] `rustc --crate-name build_script_build build.rs --crate-type bin \
     -g -C metadata=[..] --out-dir [..] --emit=dep-info,link \
     -L [..]target[/]debug[/]deps \
     --extern a=[..]liba[..].rlib`
 [RUNNING] `[..][/]foo-[..][/]build-script-build`
-[RUNNING] `rustc [..]lib.rs --crate-name foo --crate-type lib -g \
+[RUNNING] `rustc --crate-name foo [..]lib.rs --crate-type lib -g \
     -C metadata=[..] \
     --out-dir [..] --emit=dep-info,link \
     -L [..]target[/]debug[/]deps`
@@ -853,9 +853,9 @@ fn output_separate_lines() {
                 execs().with_status(101)
                        .with_stderr_contains("\
 [COMPILING] foo v0.5.0 (file://[..])
-[RUNNING] `rustc build.rs [..]`
+[RUNNING] `rustc [..] build.rs [..]`
 [RUNNING] `[..][/]foo-[..][/]build-script-build`
-[RUNNING] `rustc [..] --crate-name foo [..] -L foo -l static=foo`
+[RUNNING] `rustc --crate-name foo [..] -L foo -l static=foo`
 [ERROR] could not find native static library [..]
 "));
 }
@@ -881,9 +881,9 @@ fn output_separate_lines_new() {
                 execs().with_status(101)
                        .with_stderr_contains("\
 [COMPILING] foo v0.5.0 (file://[..])
-[RUNNING] `rustc build.rs [..]`
+[RUNNING] `rustc [..] build.rs [..]`
 [RUNNING] `[..][/]foo-[..][/]build-script-build`
-[RUNNING] `rustc [..] --crate-name foo [..] -L foo -l static=foo`
+[RUNNING] `rustc --crate-name foo [..] -L foo -l static=foo`
 [ERROR] could not find native static library [..]
 "));
 }
@@ -1141,7 +1141,8 @@ fn build_script_with_dynamic_native_dependency() {
             #[no_mangle]
             pub extern fn foo() {}
         "#);
-    assert_that(build.cargo_process("build"),
+    assert_that(build.cargo_process("build").arg("-v")
+                .env("RUST_LOG", "cargo::ops::cargo_rustc"),
                 execs().with_status(0));
 
     let foo = project("foo")
@@ -1186,7 +1187,8 @@ fn build_script_with_dynamic_native_dependency() {
             }
         "#);
 
-    assert_that(foo.cargo_process("build").env("SRC", build.root()),
+    assert_that(foo.cargo_process("build").arg("-v").env("SRC", build.root())
+                .env("RUST_LOG", "cargo::ops::cargo_rustc"),
                 execs().with_status(0));
 }
 
@@ -1597,14 +1599,14 @@ fn flags_go_into_tests() {
                 execs().with_status(0)
                        .with_stderr("\
 [COMPILING] a v0.5.0 ([..]
-[RUNNING] `rustc a[/]build.rs [..]`
+[RUNNING] `rustc [..] a[/]build.rs [..]`
 [RUNNING] `[..][/]build-script-build`
-[RUNNING] `rustc a[/]src[/]lib.rs [..] -L test[..]`
+[RUNNING] `rustc [..] a[/]src[/]lib.rs [..] -L test[..]`
 [COMPILING] b v0.5.0 ([..]
-[RUNNING] `rustc b[/]src[/]lib.rs [..] -L test[..]`
+[RUNNING] `rustc [..] b[/]src[/]lib.rs [..] -L test[..]`
 [COMPILING] foo v0.5.0 ([..]
-[RUNNING] `rustc src[/]lib.rs [..] -L test[..]`
-[RUNNING] `rustc tests[/]foo.rs [..] -L test[..]`
+[RUNNING] `rustc [..] src[/]lib.rs [..] -L test[..]`
+[RUNNING] `rustc [..] tests[/]foo.rs [..] -L test[..]`
 [FINISHED] debug [unoptimized + debuginfo] target(s) in [..]
 [RUNNING] `[..][/]foo-[..][EXE]`")
                        .with_stdout("
@@ -1619,7 +1621,7 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured
                        .with_stderr("\
 [FRESH] a v0.5.0 ([..]
 [COMPILING] b v0.5.0 ([..]
-[RUNNING] `rustc b[/]src[/]lib.rs [..] -L test[..]`
+[RUNNING] `rustc [..] b[/]src[/]lib.rs [..] -L test[..]`
 [FINISHED] debug [unoptimized + debuginfo] target(s) in [..]
 [RUNNING] `[..][/]b-[..][EXE]`")
                        .with_stdout("
@@ -1803,7 +1805,7 @@ fn rebuild_only_on_explicit_paths() {
                 execs().with_status(0).with_stderr("\
 [COMPILING] a v0.5.0 ([..])
 [RUNNING] `[..][/]build-script-build`
-[RUNNING] `rustc src[/]lib.rs [..]`
+[RUNNING] `rustc [..] src[/]lib.rs [..]`
 [FINISHED] debug [unoptimized + debuginfo] target(s) in [..]
 "));
 
@@ -1817,7 +1819,7 @@ fn rebuild_only_on_explicit_paths() {
                 execs().with_status(0).with_stderr("\
 [COMPILING] a v0.5.0 ([..])
 [RUNNING] `[..][/]build-script-build`
-[RUNNING] `rustc src[/]lib.rs [..]`
+[RUNNING] `rustc [..] src[/]lib.rs [..]`
 [FINISHED] debug [unoptimized + debuginfo] target(s) in [..]
 "));
 
@@ -1846,7 +1848,7 @@ fn rebuild_only_on_explicit_paths() {
                 execs().with_status(0).with_stderr("\
 [COMPILING] a v0.5.0 ([..])
 [RUNNING] `[..][/]build-script-build`
-[RUNNING] `rustc src[/]lib.rs [..]`
+[RUNNING] `rustc [..] src[/]lib.rs [..]`
 [FINISHED] debug [unoptimized + debuginfo] target(s) in [..]
 "));
 
@@ -1857,7 +1859,7 @@ fn rebuild_only_on_explicit_paths() {
                 execs().with_status(0).with_stderr("\
 [COMPILING] a v0.5.0 ([..])
 [RUNNING] `[..][/]build-script-build`
-[RUNNING] `rustc src[/]lib.rs [..]`
+[RUNNING] `rustc [..] src[/]lib.rs [..]`
 [FINISHED] debug [unoptimized + debuginfo] target(s) in [..]
 "));
 }
@@ -2233,7 +2235,7 @@ fn links_with_dots() {
     assert_that(p.cargo_process("build").arg("-v"),
                 execs().with_status(0)
                        .with_stderr_contains("\
-[RUNNING] `rustc [..] --crate-name foo [..] -L foo[..]`
+[RUNNING] `rustc --crate-name foo [..] [..] -L foo[..]`
 "));
 }
 
@@ -2284,5 +2286,113 @@ fn cfg_env_vars_available() {
             }
         "#);
     assert_that(build.cargo_process("bench"),
+                execs().with_status(0));
+}
+
+#[test]
+fn switch_features_rerun() {
+    let build = project("builder")
+        .file("Cargo.toml", r#"
+            [package]
+            name = "builder"
+            version = "0.0.1"
+            authors = []
+            build = "build.rs"
+
+            [features]
+            foo = []
+        "#)
+        .file("src/main.rs", r#"
+            fn main() {
+                println!(include_str!(concat!(env!("OUT_DIR"), "/output")));
+            }
+        "#)
+        .file("build.rs", r#"
+            use std::env;
+            use std::fs::File;
+            use std::io::Write;
+            use std::path::Path;
+
+            fn main() {
+                let out_dir = env::var_os("OUT_DIR").unwrap();
+                let out_dir = Path::new(&out_dir).join("output");
+                let mut f = File::create(&out_dir).unwrap();
+
+                if env::var_os("CARGO_FEATURE_FOO").is_some() {
+                    f.write_all(b"foo").unwrap();
+                } else {
+                    f.write_all(b"bar").unwrap();
+                }
+            }
+        "#);
+    build.build();
+
+    assert_that(build.cargo("run").arg("-v").arg("--features=foo"),
+                execs().with_status(0).with_stdout("foo\n"));
+    assert_that(build.cargo("run").arg("-v"),
+                execs().with_status(0).with_stdout("bar\n"));
+    assert_that(build.cargo("run").arg("-v").arg("--features=foo"),
+                execs().with_status(0).with_stdout("foo\n"));
+}
+
+#[test]
+fn assume_build_script_when_build_rs_present() {
+    let p = project("builder")
+        .file("Cargo.toml", r#"
+            [package]
+            name = "builder"
+            version = "0.0.1"
+            authors = []
+        "#)
+        .file("src/main.rs", r#"
+            fn main() {
+                if cfg!(foo) {
+                    panic!("the build script was run");
+                }
+            }
+        "#)
+        .file("build.rs", r#"
+            fn main() {
+                println!("cargo:rustc-cfg=foo");
+            }
+        "#);
+    p.build();
+
+    assert_that(p.cargo("run").arg("-v"),
+                execs().with_status(0).with_stderr("\
+warning: `build.rs` files in the same directory as your `Cargo.toml` will soon be treated \
+as build scripts. Add `build = false` to your `Cargo.toml` to prevent this
+   Compiling builder v0.0.1 ([..])
+     Running [..]
+    Finished [..]
+     Running [..]
+"));
+}
+
+#[test]
+fn if_build_set_to_false_dont_treat_build_rs_as_build_script() {
+    let p = project("builder")
+        .file("Cargo.toml", r#"
+            [package]
+            name = "builder"
+            version = "0.0.1"
+            authors = []
+            build = false
+        "#)
+        .file("src/main.rs", r#"
+            fn main() {
+                if cfg!(foo) {
+                    panic!("the build script was run");
+                }
+            }
+        "#)
+        .file("build.rs", r#"
+            fn main() {
+                println!("cargo:rustc-cfg=foo");
+            }
+        "#);
+    p.build();
+
+    assert_that(p.cargo("run").arg("-v"),
                 execs().with_status(0));
 }

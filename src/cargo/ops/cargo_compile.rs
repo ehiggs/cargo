@@ -47,8 +47,8 @@ pub struct CompileOptions<'a> {
     pub all_features: bool,
     /// Flag if the default feature should be built for the root package
     pub no_default_features: bool,
-    /// Root package to build (if None it's the current one)
-    pub spec: &'a [String],
+    /// A set of packages to build.
+    pub spec: Packages<'a>,
     /// Filter to apply to the root package to select which targets will be
     /// built.
     pub filter: CompileFilter<'a>,
@@ -65,10 +65,11 @@ pub struct CompileOptions<'a> {
     pub target_rustc_args: Option<&'a [String]>,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum CompileMode {
     Test,
     Build,
+    Check,
     Bench,
     Doc { deps: bool },
 }
@@ -77,6 +78,29 @@ pub enum CompileMode {
 pub enum MessageFormat {
     Human,
     Json
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Packages<'a> {
+    All,
+    Packages(&'a [String]),
+}
+
+impl<'a> Packages<'a> {
+    pub fn into_package_id_specs(self, ws: &Workspace) -> CargoResult<Vec<PackageIdSpec>> {
+        let specs = match self {
+            Packages::All => {
+                ws.members()
+                    .map(Package::package_id)
+                    .map(PackageIdSpec::from_package_id)
+                    .collect()
+            }
+            Packages::Packages(packages) => {
+                packages.iter().map(|p| PackageIdSpec::parse(&p)).collect::<CargoResult<Vec<_>>>()?
+            }
+        };
+        Ok(specs)
+    }
 }
 
 pub enum CompileFilter<'a> {
@@ -92,8 +116,10 @@ pub enum CompileFilter<'a> {
 
 pub fn compile<'a>(ws: &Workspace<'a>, options: &CompileOptions<'a>)
                    -> CargoResult<ops::Compilation<'a>> {
-    for key in ws.current()?.manifest().warnings().iter() {
-        options.config.shell().warn(key)?
+    for member in ws.members() {
+        for key in member.manifest().warnings().iter() {
+            options.config.shell().warn(key)?
+        }
     }
     compile_ws(ws, None, options)
 }
@@ -112,8 +138,9 @@ pub fn resolve_dependencies<'a>(ws: &Workspace<'a>,
     let mut registry = PackageRegistry::new(ws.config())?;
 
     if let Some(source) = source {
-        registry.add_preloaded(ws.current()?.package_id().source_id(),
-                               source);
+        if let Some(root_package) = ws.current_opt() {
+            registry.add_preloaded(root_package.package_id().source_id(), source);
+        }
     }
 
     // First, resolve the root_package's *listed* dependencies, as well as
@@ -140,7 +167,15 @@ pub fn resolve_dependencies<'a>(ws: &Workspace<'a>,
     let resolved_with_overrides =
             ops::resolve_with_previous(&mut registry, ws,
                                             method, Some(&resolve), None,
-                                            specs)?;
+                                            &specs)?;
+
+    for &(ref replace_spec, _) in ws.root_replace() {
+        if !resolved_with_overrides.replacements().keys().any(|r| replace_spec.matches(r)) {
+            ws.config().shell().warn(
+                format!("package replacement is not used: {}", replace_spec)
+            )?
+        }
+    }
 
     let packages = ops::get_resolved_packages(&resolved_with_overrides,
                                               registry);
@@ -152,7 +187,6 @@ pub fn compile_ws<'a>(ws: &Workspace<'a>,
                       source: Option<Box<Source + 'a>>,
                       options: &CompileOptions<'a>)
                       -> CargoResult<ops::Compilation<'a>> {
-    let root_package = ws.current()?;
     let CompileOptions { config, jobs, target, spec, features,
                          all_features, no_default_features,
                          release, mode, message_format,
@@ -167,27 +201,24 @@ pub fn compile_ws<'a>(ws: &Workspace<'a>,
     }
 
     let profiles = ws.profiles();
-    if spec.len() == 0 {
-        generate_targets(root_package, profiles, mode, filter, release)?;
-    }
 
-    let specs = spec.iter().map(|p| PackageIdSpec::parse(p))
-                                .collect::<CargoResult<Vec<_>>>()?;
-
-    let pair = resolve_dependencies(ws,
-                                         source,
-                                         features,
-                                         all_features,
-                                         no_default_features,
-                                         &specs)?;
-    let (packages, resolve_with_overrides) = pair;
+    let specs = spec.into_package_id_specs(ws)?;
+    let resolve = resolve_dependencies(ws,
+                                       source,
+                                       features,
+                                       all_features,
+                                       no_default_features,
+                                       &specs)?;
+    let (packages, resolve_with_overrides) = resolve;
 
     let mut pkgids = Vec::new();
-    if spec.len() > 0 {
-        for p in spec {
-            pkgids.push(resolve_with_overrides.query(&p)?);
+    if specs.len() > 0 {
+        for p in specs.iter() {
+            pkgids.push(p.query(resolve_with_overrides.iter())?);
         }
     } else {
+        let root_package = ws.current()?;
+        generate_targets(root_package, profiles, mode, filter, release)?;
         pkgids.push(root_package.package_id());
     };
 
@@ -251,7 +282,7 @@ pub fn compile_ws<'a>(ws: &Workspace<'a>,
         let mut build_config = scrape_build_config(config, jobs, target)?;
         build_config.release = release;
         build_config.test = mode == CompileMode::Test || mode == CompileMode::Bench;
-        build_config.json_errors = message_format == MessageFormat::Json;
+        build_config.json_messages = message_format == MessageFormat::Json;
         if let CompileMode::Doc { deps } = mode {
             build_config.doc_all = deps;
         }
@@ -319,6 +350,7 @@ fn generate_targets<'a>(pkg: &'a Package,
         CompileMode::Test => test,
         CompileMode::Bench => &profiles.bench,
         CompileMode::Build => build,
+        CompileMode::Check => &profiles.check,
         CompileMode::Doc { .. } => &profiles.doc,
     };
     match *filter {
@@ -350,7 +382,7 @@ fn generate_targets<'a>(pkg: &'a Package,
                     }
                     Ok(base)
                 }
-                CompileMode::Build => {
+                CompileMode::Build | CompileMode::Check => {
                     Ok(pkg.targets().iter().filter(|t| {
                         t.is_bin() || t.is_lib()
                     }).map(|t| (t, profile)).collect())
@@ -512,7 +544,7 @@ fn scrape_target_config(config: &Config, triple: &str)
                     let (flags, definition) = value.string(&k)?;
                     let whence = format!("in `{}` (in {})", key,
                                          definition.display());
-                    let (paths, links) = 
+                    let (paths, links) =
                         BuildOutput::parse_rustc_flags(&flags, &whence)
                     ?;
                     output.library_paths.extend(paths);

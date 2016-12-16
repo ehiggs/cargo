@@ -43,7 +43,7 @@ Options:
     -V, --version       Print version info and exit
     --list              List installed commands
     --explain CODE      Run `rustc --explain CODE`
-    -v, --verbose ...   Use verbose output
+    -v, --verbose ...   Use verbose output (-vv very verbose/build.rs output)
     -q, --quiet         No output printed to stdout
     --color WHEN        Coloring: auto, always, never
     --frozen            Require Cargo.lock and cache are up to date
@@ -51,6 +51,7 @@ Options:
 
 Some common cargo commands are (see all commands with --list):
     build       Compile the current project
+    check       Analyze the current project and report errors, but don't build object files
     clean       Remove the target directory
     doc         Build this project's and its dependencies' documentation
     new         Create a new cargo project
@@ -75,6 +76,7 @@ macro_rules! each_subcommand{
     ($mac:ident) => {
         $mac!(bench);
         $mac!(build);
+        $mac!(check);
         $mac!(clean);
         $mac!(doc);
         $mac!(fetch);
@@ -291,8 +293,7 @@ fn execute_subcommand(config: &Config,
     }
 }
 
-/// List all runnable commands. find_command should always succeed
-/// if given one of returned command.
+/// List all runnable commands
 fn list_commands(config: &Config) -> BTreeSet<String> {
     let prefix = "cargo-";
     let suffix = env::consts::EXE_SUFFIX;
