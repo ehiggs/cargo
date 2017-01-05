@@ -9,6 +9,7 @@ use cargo::util::process;
 use cargotest::sleep_ms;
 use cargotest::support::paths::{self, CargoPathExt};
 use cargotest::support::{project, execs, main_file};
+use cargotest::support::registry::Package;
 use hamcrest::{assert_that, existing_file};
 
 #[test]
@@ -89,7 +90,7 @@ fn cargo_compile_with_nested_deps_shorthand() {
                 execs().with_stdout("test passed\n").with_status(0));
 
     println!("cleaning");
-    assert_that(p.cargo("clean"),
+    assert_that(p.cargo("clean").arg("-v"),
                 execs().with_stdout("").with_status(0));
     println!("building baz");
     assert_that(p.cargo("build").arg("-p").arg("baz"),
@@ -189,7 +190,7 @@ fn cargo_compile_with_root_dev_deps_with_testing() {
 [COMPILING] [..] v0.5.0 ([..])
 [COMPILING] [..] v0.5.0 ([..])
 [FINISHED] debug [unoptimized + debuginfo] target(s) in [..]
-[RUNNING] target[/]debug[/]foo-[..][EXE]")
+[RUNNING] target[/]debug[/]deps[/]foo-[..][EXE]")
                        .with_stdout("
 running 0 tests
 
@@ -922,5 +923,59 @@ Caused by:
 
 Caused by:
   [..] (os error [..])
+"));
+}
+
+#[test]
+fn invalid_path_dep_in_workspace_with_lockfile() {
+    Package::new("bar", "1.0.0").publish();
+
+    let p = project("foo")
+        .file("Cargo.toml", r#"
+            [project]
+            name = "top"
+            version = "0.5.0"
+            authors = []
+
+            [workspace]
+
+            [dependencies]
+            foo = { path = "foo" }
+        "#)
+        .file("src/lib.rs", "")
+        .file("foo/Cargo.toml", r#"
+            [project]
+            name = "foo"
+            version = "0.5.0"
+            authors = []
+
+            [dependencies]
+            bar = "*"
+        "#)
+        .file("foo/src/lib.rs", "");
+    p.build();
+
+    // Generate a lock file
+    assert_that(p.cargo("build"), execs().with_status(0));
+
+    // Change the dependency on `bar` to an invalid path
+    File::create(&p.root().join("foo/Cargo.toml")).unwrap().write_all(br#"
+        [project]
+        name = "foo"
+        version = "0.5.0"
+        authors = []
+
+        [dependencies]
+        bar = { path = "" }
+    "#).unwrap();
+
+    // Make sure we get a nice error. In the past this actually stack
+    // overflowed!
+    assert_that(p.cargo("build"),
+                execs().with_status(101)
+                       .with_stderr("\
+error: no matching package named `bar` found (required by `foo`)
+location searched: [..]
+version required: *
 "));
 }

@@ -40,7 +40,6 @@ mod cfg;
 mod dependency_queue;
 mod rustc;
 mod sha256;
-mod shell_escape;
 mod vcs;
 mod lazy_cell;
 mod flock;

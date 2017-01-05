@@ -3,7 +3,6 @@ use std::fs;
 use std::path::Path;
 
 use core::{Profiles, Workspace};
-use core::registry::PackageRegistry;
 use util::{CargoResult, human, ChainError, Config};
 use ops::{self, Context, BuildConfig, Kind, Unit};
 
@@ -28,9 +27,7 @@ pub fn clean(ws: &Workspace, opts: &CleanOptions) -> CargoResult<()> {
         return rm_rf(&target_dir);
     }
 
-    let mut registry = PackageRegistry::new(opts.config)?;
-    let resolve = ops::resolve_ws(&mut registry, ws)?;
-    let packages = ops::get_resolved_packages(&resolve, registry);
+    let (packages, resolve) = ops::resolve_ws(ws)?;
 
     let profiles = ws.profiles();
     let host_triple = opts.config.rustc()?.host.clone();
@@ -54,10 +51,10 @@ pub fn clean(ws: &Workspace, opts: &CleanOptions) -> CargoResult<()> {
             for kind in [Kind::Host, Kind::Target].iter() {
                 let Profiles {
                     ref release, ref dev, ref test, ref bench, ref doc,
-                    ref custom_build, ref test_deps, ref bench_deps,
+                    ref custom_build, ref test_deps, ref bench_deps, ref check
                 } = *profiles;
                 let profiles = [release, dev, test, bench, doc, custom_build,
-                                test_deps, bench_deps];
+                                test_deps, bench_deps, check];
                 for profile in profiles.iter() {
                     units.push(Unit {
                         pkg: &pkg,
@@ -73,13 +70,21 @@ pub fn clean(ws: &Workspace, opts: &CleanOptions) -> CargoResult<()> {
     cx.probe_target_info(&units)?;
 
     for unit in units.iter() {
-        let layout = cx.layout(unit);
-        rm_rf(&layout.proxy().fingerprint(&unit.pkg))?;
-        rm_rf(&layout.build(&unit.pkg))?;
+        rm_rf(&cx.fingerprint_dir(unit))?;
+        if unit.target.is_custom_build() {
+            if unit.profile.run_custom_build {
+                rm_rf(&cx.build_script_out_dir(unit))?;
+            } else {
+                rm_rf(&cx.build_script_dir(unit))?;
+            }
+            continue
+        }
 
-        let root = cx.out_dir(&unit);
-        for (filename, _) in cx.target_filenames(&unit)? {
-            rm_rf(&root.join(&filename))?;
+        for (src, link_dst, _) in cx.target_filenames(unit)? {
+            rm_rf(&src)?;
+            if let Some(dst) = link_dst {
+                rm_rf(&dst)?;
+            }
         }
     }
 

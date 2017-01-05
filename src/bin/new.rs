@@ -36,7 +36,7 @@ Options:
     --name NAME         Set the resulting package name
     --template <template>  Use a specified template
     --template-repo <repository>  Use a specified template repository
-    -v, --verbose ...   Use verbose output
+    -v, --verbose ...   Use verbose output (-vv very verbose/build.rs output)
     -q, --quiet         No output printed to stdout
     --color WHEN        Coloring: auto, always, never
     --frozen            Require Cargo.lock and cache are up to date
