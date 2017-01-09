@@ -72,8 +72,8 @@ fn main () {
 }
     "#).unwrap();
 
-    assert_that(cargo_process("new").arg("--template").arg("testtemplate")
-                                    .arg("--template-repo")
+    assert_that(cargo_process("new").arg("--template-subdir").arg("testtemplate")
+                                    .arg("--template")
                                     .arg(&root.join("home/.cargo/templates/"))
                                     .arg("foo")
                                     .env("USER", "foo"),
@@ -108,7 +108,7 @@ authors = ["{{author}}"]
             "#)
     }).unwrap();
 
-    assert_that(cargo_process("new").arg("--template-repo").arg(git_project.url().as_str())
+    assert_that(cargo_process("new").arg("--template").arg(git_project.url().as_str())
                                     .arg("foo")
                                     .env("USER", "foo"),
                 execs().with_status(0));

@@ -117,6 +117,7 @@ impl TemplateDirectory {
     }
 }
 
+/// A listing of all the files that are part of the template.
 pub struct TemplateSet {
     pub template_dir: Option<TemplateDirectory>,
     pub template_files: Vec<Box<TemplateFile>>
@@ -130,9 +131,11 @@ pub enum TemplateType<'a>  {
     Builtin
 }
 
+/// Given a repository string and subdir, determine if this is a git repository, local file, or a
+/// built in template.
 pub fn get_template_type<'a>(repo: Option<&'a str>,
-                             name: Option<&'a str>) -> CargoResult<TemplateType<'a>> {
-    match (repo, name) {
+                             subdir: Option<&'a str>) -> CargoResult<TemplateType<'a>> {
+    match (repo, subdir) {
         (Some(repo_url), _) if repo_url.starts_with("http://")  ||
             repo_url.starts_with("https://") ||
             repo_url.starts_with("file://") ||

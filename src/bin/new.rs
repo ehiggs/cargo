@@ -12,8 +12,8 @@ pub struct Options {
     flag_lib: bool,
     arg_path: String,
     flag_name: Option<String>,
+    flag_template_subdir: Option<String>,
     flag_template: Option<String>,
-    flag_template_repo: Option<String>,
     flag_vcs: Option<ops::VersionControl>,
     flag_frozen: bool,
     flag_locked: bool,
@@ -34,8 +34,8 @@ Options:
     --bin               Use a binary (application) template
     --lib               Use a library template
     --name NAME         Set the resulting package name
-    --template <template>  Use a specified template
-    --template-repo <repository>  Use a specified template repository
+    --template <repository>  Use a specified template repository
+    --template-subdir <template-subdir>  Use a specified template within a template repository
     -v, --verbose ...   Use verbose output (-vv very verbose/build.rs output)
     -q, --quiet         No output printed to stdout
     --color WHEN        Coloring: auto, always, never
@@ -55,7 +55,7 @@ pub fn execute(options: Options, config: &Config) -> CliResult<Option<()>> {
         flag_bin, flag_lib, 
         arg_path, flag_name, 
         flag_vcs, 
-        flag_template, flag_template_repo, 
+        flag_template_subdir, flag_template, 
         .. 
     } = options;
 
@@ -64,8 +64,8 @@ pub fn execute(options: Options, config: &Config) -> CliResult<Option<()>> {
                                     flag_lib,
                                     &arg_path,
                                     flag_name.as_ref().map(|s| s.as_ref()),
-                                    flag_template.as_ref().map(|s| s.as_ref()),
-                                    flag_template_repo.as_ref().map(|s| s.as_ref()));
+                                    flag_template_subdir.as_ref().map(|s| s.as_ref()),
+                                    flag_template.as_ref().map(|s| s.as_ref()));
 
     let opts_lib = opts.lib;
     ops::new(opts, config)?;

@@ -27,8 +27,8 @@ pub struct NewOptions<'a> {
     pub lib: bool,
     pub path: &'a str,
     pub name: Option<&'a str>,
+    pub template_subdir: Option<&'a str>,
     pub template: Option<&'a str>,
-    pub template_repo: Option<&'a str>,
 }
 
 struct SourceFileInformation {
@@ -39,8 +39,8 @@ struct SourceFileInformation {
 
 struct MkOptions<'a> {
     version_control: Option<VersionControl>,
+    template_subdir: Option<&'a str>,
     template: Option<&'a str>,
-    template_repo: Option<&'a str>,
     path: &'a Path,
     name: &'a str,
     bin: bool,
@@ -66,8 +66,8 @@ impl<'a> NewOptions<'a> {
            lib: bool,
            path: &'a str,
            name: Option<&'a str>,
-           template: Option<&'a str>,
-           template_repo: Option<&'a str>) -> NewOptions<'a> {
+           template_subdir: Option<&'a str>,
+           template: Option<&'a str>) -> NewOptions<'a> {
 
         // default to lib
         let is_lib = if !bin {
@@ -83,8 +83,8 @@ impl<'a> NewOptions<'a> {
             lib: is_lib,
             path: path,
             name: name,
+            template_subdir: template_subdir,
             template: template,
-            template_repo: template_repo,
         }
     }
 }
@@ -99,7 +99,7 @@ fn get_input_template(config: &Config, opts: &MkOptions) -> CargoResult<Template
     let path = opts.path;
     let name = opts.name;
 
-    let template_type = try!(get_template_type(opts.template_repo, opts.template));
+    let template_type = try!(get_template_type(opts.template, opts.template_subdir));
     let template_set = match template_type {
         // given template is a remote git repository & needs to be cloned
         TemplateType::GitRepo(repo_url) => {
@@ -108,7 +108,7 @@ fn get_input_template(config: &Config, opts: &MkOptions) -> CargoResult<Template
             try!(Repository::clone(repo_url, &*template_dir.path()).chain_error(|| {
                 human(format!("Failed to clone repository: {}", path.display()))
             }));
-            let template_path = find_template_subdir(&template_dir.path(), opts.template);
+            let template_path = find_template_subdir(&template_dir.path(), opts.template_subdir);
             TemplateSet {
                 template_dir: Some(TemplateDirectory::Temp(template_dir)),
                 template_files: try!(collect_template_dir(&template_path, opts.path))
@@ -120,7 +120,7 @@ fn get_input_template(config: &Config, opts: &MkOptions) -> CargoResult<Template
             if fs::metadata(&directory).is_err() {
                 bail!("template `{}` not found", directory);
             }
-            let template_path = find_template_subdir(&PathBuf::from(directory), opts.template);
+            let template_path = find_template_subdir(&PathBuf::from(directory), opts.template_subdir);
             TemplateSet {
                 template_dir: Some(TemplateDirectory::Normal(PathBuf::from(directory))),
                 template_files: try!(collect_template_dir(&template_path, opts.path))
@@ -328,8 +328,8 @@ pub fn new(opts: NewOptions, config: &Config) -> CargoResult<()> {
 
     let mkopts = MkOptions {
         version_control: opts.version_control,
+        template_subdir: opts.template_subdir,
         template: opts.template,
-        template_repo: opts.template_repo,
         path: &path,
         name: name,
         bin: opts.bin,
@@ -395,8 +395,8 @@ pub fn init(opts: NewOptions, config: &Config) -> CargoResult<()> {
 
     let mkopts = MkOptions {
         version_control: version_control,
+        template_subdir: opts.template_subdir,
         template: opts.template,
-        template_repo: opts.template_repo,
         path: &path,
         name: name,
         bin: src_paths_types.iter().any(|x|x.bin),
@@ -527,8 +527,8 @@ fn mk(config: &Config, opts: &MkOptions) -> CargoResult<()> {
     Ok(())
 }
 
-// When the command line has --template-repo=<repository-or-directory> and
-// --template=<template-name> then find_template_subdir fixes up the name as appropriate.
+// When the command line has --template=<repository-or-directory> and
+// --template-subdir=<template-name> then find_template_subdir fixes up the name as appropriate.
 fn find_template_subdir(template_dir: &Path, template: Option<&str>) -> PathBuf {
     match template {
         Some(template) => template_dir.join(template),

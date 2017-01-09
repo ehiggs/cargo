@@ -420,26 +420,36 @@ projects. By default, there are only two templates available, `bin` and `lib`.
 These are used by cargo to create the standard project structure.
 
 You can also specify other templates from which to scaffold your project. The
-`--template` argument to `cargo new` accepts either a template name that you
-have downloaded on your system, or a URL to a remote Git repository containing
-the project template.
+`--template` argument to `cargo new` accepts either a path on your system, or a
+URL to a remote Git repository containing a project template.
 
 ```
 # use the mytemplate template which is located in ~/.cargo/templates/mytemplate
-$ cargo new myproj --template mytemplate
+$ cargo new myproj --template ~/.cargo/mytemplates/mytemplate
 
 # download the template called mytemplate from your github package
 $ cargo new myproj --template http://github.com/you/mytemplate
+```
+
+If you have a collection of templates in a Git repository then you can use the
+`--template-subdir` option to specify the subdirectory containing the template
+you want to use.
+
+```
+# download the template project called mytemplates from your github package
+# and use the 'command-line-project' template.
+$ cargo new myproj --template http://github.com/you/mytemplate --template-subdir command-line-project
 ```
 
 ## Creating new templates
 
 A cargo template is just a folder containing one or more files. Usually, there
 is a `Cargo.toml` and a `src` directory. Each file in the template directory
-will be treated as a handlebars template. This means you can use handlebars
-variables wherever you want dynamic content, and cargo will render the proper
-values. Let's create a simple example. Create a new folder called `mytemplate`
-in your `~/.cargo/templates` directory..
+(aside from the contents of the .git directory) will be treated as a handlebars
+template. This means you can use handlebars variables wherever you want dynamic
+content, and cargo will render the proper values. Let's create a simple example.
+Create a new folder called `mytemplate`
+
 Add the following files:
 
 ```toml
@@ -482,8 +492,9 @@ The available templating functions are:
 - `html-escape`: Escapes a string for use in a HTML file.
 
 There is more documentation available on the [Handlebars
-website](http://handlebarsjs.com/) though keep in mind that the Rust
-implementation of Handlebars isn't 100% compatible with the Javascript version.
+website](http://handlebarsjs.com/) though keep in mind that [the Rust
+implementation of Handlebars](https://docs.rs/handlebars/0.24.1/handlebars/)
+isn't 100% compatible with the Javascript version.
 
 # Further reading
 
