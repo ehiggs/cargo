@@ -120,7 +120,8 @@ fn get_input_template(config: &Config, opts: &MkOptions) -> CargoResult<Template
             if fs::metadata(&directory).is_err() {
                 bail!("template `{}` not found", directory);
             }
-            let template_path = find_template_subdir(&PathBuf::from(directory), opts.template_subdir);
+            let template_path = find_template_subdir(&PathBuf::from(directory), 
+                                                     opts.template_subdir);
             TemplateSet {
                 template_dir: Some(TemplateDirectory::Normal(PathBuf::from(directory))),
                 template_files: try!(collect_template_dir(&template_path, opts.path))
