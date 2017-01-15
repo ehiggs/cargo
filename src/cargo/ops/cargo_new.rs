@@ -5,14 +5,15 @@ use std::collections::BTreeMap;
 use rustc_serialize::{Decodable, Decoder};
 
 use git2::Config as GitConfig;
-use git2::Repository;
 
 use term::color::BLACK;
 
 use handlebars::{Handlebars, Context, no_escape};
 use tempdir::TempDir;
+use url::Url;
 
 use core::Workspace;
+use sources::git::GitRemote;
 use util::{GitRepo, HgRepo, CargoResult, human, ChainError, internal};
 use util::{Config, paths, template};
 use util::template::{TemplateSet, TemplateFile, TemplateDirectory, TemplateType};
@@ -105,7 +106,11 @@ fn get_input_template(config: &Config, opts: &MkOptions) -> CargoResult<Template
         TemplateType::GitRepo(repo_url) => {
             let template_dir = try!(TempDir::new(name));
             try!(config.shell().status("Cloning", repo_url));
-            try!(Repository::clone(repo_url, &*template_dir.path()).chain_error(|| {
+            let url = try!(Url::parse(repo_url).chain_error(|| {
+                human(format!("Repo string was not a valid url: {}", repo_url))
+            }));
+            let repo = GitRemote::new(&url);
+            try!(repo.checkout(template_dir.path(), config).chain_error(|| {
                 human(format!("Failed to clone repository: {}", path.display()))
             }));
             let template_path = find_template_subdir(&template_dir.path(), opts.template_subdir);
