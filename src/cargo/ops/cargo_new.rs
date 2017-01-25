@@ -10,10 +10,9 @@ use term::color::BLACK;
 
 use handlebars::{Handlebars, Context, no_escape};
 use tempdir::TempDir;
-use url::Url;
 
 use core::Workspace;
-use sources::git::GitRemote;
+use sources::git::clone;
 use util::{GitRepo, HgRepo, CargoResult, human, ChainError, internal};
 use util::{Config, paths, template};
 use util::template::{TemplateSet, TemplateFile, TemplateDirectory, TemplateType};
@@ -97,7 +96,6 @@ struct CargoNewConfig {
 }
 
 fn get_input_template(config: &Config, opts: &MkOptions) -> CargoResult<TemplateSet> {
-    let path = opts.path;
     let name = opts.name;
 
     let template_type = try!(get_template_type(opts.template, opts.template_subdir));
@@ -105,14 +103,8 @@ fn get_input_template(config: &Config, opts: &MkOptions) -> CargoResult<Template
         // given template is a remote git repository & needs to be cloned
         TemplateType::GitRepo(repo_url) => {
             let template_dir = try!(TempDir::new(name));
-            try!(config.shell().status("Cloning", repo_url));
-            let url = try!(Url::parse(repo_url).chain_error(|| {
-                human(format!("Repo string was not a valid url: {}", repo_url))
-            }));
-            let repo = GitRemote::new(&url);
-            try!(repo.checkout(template_dir.path(), config).chain_error(|| {
-                human(format!("Failed to clone repository: {}", path.display()))
-            }));
+            config.shell().status("Cloning", &repo_url)?;
+            clone(&repo_url, &template_dir.path(), &config)?;
             let template_path = find_template_subdir(&template_dir.path(), opts.template_subdir);
             TemplateSet {
                 template_dir: Some(TemplateDirectory::Temp(template_dir)),
@@ -125,7 +117,7 @@ fn get_input_template(config: &Config, opts: &MkOptions) -> CargoResult<Template
             if fs::metadata(&directory).is_err() {
                 bail!("template `{}` not found", directory);
             }
-            let template_path = find_template_subdir(&PathBuf::from(directory), 
+            let template_path = find_template_subdir(&PathBuf::from(&directory),
                                                      opts.template_subdir);
             TemplateSet {
                 template_dir: Some(TemplateDirectory::Normal(PathBuf::from(directory))),

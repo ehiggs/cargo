@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::{Read};
 
 use util::{CargoResult, human, ChainError};
+use url::Url;
 
 use handlebars::{Context, Helper, Handlebars, RenderContext, RenderError, html_escape};
 use tempdir::TempDir;
@@ -125,26 +126,30 @@ pub struct TemplateSet {
 
 // The type of template we will use.
 #[derive(Debug, Eq, PartialEq)]
-pub enum TemplateType<'a>  {
-    GitRepo(&'a str),
-    LocalDir(&'a str),
+pub enum TemplateType  {
+    GitRepo(String),
+    LocalDir(String),
     Builtin
 }
 
 /// Given a repository string and subdir, determine if this is a git repository, local file, or a
 /// built in template.
 pub fn get_template_type<'a>(repo: Option<&'a str>,
-                             subdir: Option<&'a str>) -> CargoResult<TemplateType<'a>> {
+                             subdir: Option<&'a str>) -> CargoResult<TemplateType> {
     match (repo, subdir) {
-        (Some(repo_url), _) if repo_url.starts_with("http://")  ||
-            repo_url.starts_with("https://") ||
-            repo_url.starts_with("git://") => Ok(TemplateType::GitRepo(repo_url)),
-            // file:// is really a local directory, so strip off the url scheme.
-        (Some(repo_url), _) if repo_url.starts_with("file://") => {
-            let scheme_len = "file://".len();
-            Ok(TemplateType::LocalDir(&repo_url[scheme_len..]))
+        (Some(repo_str), _) => {
+            if let Ok(repo_url) = Url::parse(&repo_str) {
+                let supported_schemes = ["git", "file", "http", "https", "ssh"];
+                if supported_schemes.contains(&repo_url.scheme()) {
+                    Ok(TemplateType::GitRepo(repo_url.into_string()))
+                } else {
+                    Err(human(format!("A URL was given with an unsupported scheme: {}",
+                                      repo_url.scheme())))
+                }
+            } else {
+                Ok(TemplateType::LocalDir(String::from(repo_str)))
+            }
         },
-        (Some(directory), _) => Ok(TemplateType::LocalDir(directory)),
         (None, Some(_)) => Err(human("A template was given, but no template repository")),
         (None, None) => Ok(TemplateType::Builtin)
     }
@@ -172,11 +177,11 @@ mod test {
             #[test]
             fn $funcname() {
                 assert_eq!(get_template_type(Some($url), Some("foo")).unwrap(),
-                TemplateType::GitRepo($url));
+                TemplateType::GitRepo($url.to_owned()));
                 assert_eq!(get_template_type(Some($url), Some("")).unwrap(),
-                TemplateType::GitRepo($url));
+                TemplateType::GitRepo($url.to_owned()));
                 assert_eq!(get_template_type(Some($url), None).unwrap(),
-                TemplateType::GitRepo($url));
+                TemplateType::GitRepo($url.to_owned()));
             }
         }
     }
@@ -184,44 +189,34 @@ mod test {
     test_get_template_proto!(test_get_template_http, "http://foo.com/user/repo");
     test_get_template_proto!(test_get_template_https, "https://foo.com/user/repo");
     test_get_template_proto!(test_get_template_git, "git://foo.com/user/repo");
-    // ssh protocol (i.e. for private repos) isn't supported (yet).
+    test_get_template_proto!(test_get_template_file, "file://foo.com/user/repo");
+    test_get_template_proto!(test_get_template_ssh, "ssh://user@foo.com/repo");
+    // ssh scp protocol (i.e. for private repos) isn't supported (yet).
     //test_get_template_proto!(test_get_template_ssh, "git@foo.com:user/repo");
 
     #[test]
-    fn test_get_template_type_git_repo_bad_proto_is_local_dir() {
-        // We didn't detect a protocol that we use, so it's treated as a directory.
-        assert_eq!(get_template_type(Some("ftps://foo.com/user/repo"), None).unwrap(),
-                   TemplateType::LocalDir("ftps://foo.com/user/repo"));
-    }
-
-    #[test]
-    fn test_get_template_type_local_dir_file_style() {
-        assert_eq!(get_template_type(Some("file:///foo/user/repo"), Some("foo")).unwrap(),
-                   TemplateType::LocalDir("/foo/user/repo"));
-        assert_eq!(get_template_type(Some("file:///foo/user/repo"), Some("")).unwrap(),
-                   TemplateType::LocalDir("/foo/user/repo"));
-        assert_eq!(get_template_type(Some("file:///foo/user/repo"), None).unwrap(),
-                   TemplateType::LocalDir("/foo/user/repo"));
+    fn test_get_template_type_git_repo_bad_proto_is_err() {
+        assert!(get_template_type(Some("ftps://foo.com/user/repo"), None).is_err());
     }
 
     #[test]
     fn test_get_template_type_local_dir_abs() {
         assert_eq!(get_template_type(Some("/foo/user/repo"), Some("foo")).unwrap(),
-                   TemplateType::LocalDir("/foo/user/repo"));
+                   TemplateType::LocalDir("/foo/user/repo".to_owned()));
         assert_eq!(get_template_type(Some("/foo/user/repo"), Some("")).unwrap(),
-                   TemplateType::LocalDir("/foo/user/repo"));
+                   TemplateType::LocalDir("/foo/user/repo".to_owned()));
         assert_eq!(get_template_type(Some("/foo/user/repo"), None).unwrap(),
-                   TemplateType::LocalDir("/foo/user/repo"));
+                   TemplateType::LocalDir("/foo/user/repo".to_owned()));
     }
 
     #[test]
     fn test_get_template_type_local_dir_rel() {
         assert_eq!(get_template_type(Some("foo/user/repo"), Some("foo")).unwrap(),
-                   TemplateType::LocalDir("foo/user/repo"));
+                   TemplateType::LocalDir("foo/user/repo".to_owned()));
         assert_eq!(get_template_type(Some("foo/user/repo"), Some("")).unwrap(),
-                   TemplateType::LocalDir("foo/user/repo"));
+                   TemplateType::LocalDir("foo/user/repo".to_owned()));
         assert_eq!(get_template_type(Some("foo/user/repo"), None).unwrap(),
-                   TemplateType::LocalDir("foo/user/repo"));
+                   TemplateType::LocalDir("foo/user/repo".to_owned()));
     }
 
     #[test]

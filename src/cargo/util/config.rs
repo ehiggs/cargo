@@ -65,10 +65,6 @@ impl Config {
 
     pub fn home(&self) -> &Filesystem { &self.home_path }
 
-    pub fn template_path(&self) -> PathBuf {
-        self.home_path.join("templates").into_path_unlocked()
-    }
-
     pub fn git_path(&self) -> Filesystem {
         self.home_path.join("git")
     }

@@ -415,9 +415,10 @@ information.
 
 # Templates
 
-Cargo uses the handlebars library to compile the templates used to scaffold
-projects. By default, there are only two templates available, `bin` and `lib`.
-These are used by cargo to create the standard project structure.
+Cargo uses the [handlebars](https://github.com/sunng87/handlebars-rust) library
+to compile the templates used to scaffold projects. By default, there are only
+two templates available, `bin` and `lib`.  These are used by cargo to create the
+standard project structure.
 
 You can also specify other templates from which to scaffold your project. The
 `--template` argument to `cargo new` accepts either a path on your system, or a
