@@ -133,7 +133,10 @@ pub enum TemplateType  {
 }
 
 /// Given a repository string and subdir, determine if this is a git repository, local file, or a
-/// built in template.
+/// built in template. Git only supports a few schemas, so anything that is not supported is
+/// treated as a local path. The supported schemes are:
+/// "git", "file", "http", "https", and "ssh"
+/// Also supported is an scp style syntax: git@domain.com:user/path
 pub fn get_template_type<'a>(repo: Option<&'a str>,
                              subdir: Option<&'a str>) -> CargoResult<TemplateType> {
     match (repo, subdir) {
@@ -143,8 +146,7 @@ pub fn get_template_type<'a>(repo: Option<&'a str>,
                 if supported_schemes.contains(&repo_url.scheme()) {
                     Ok(TemplateType::GitRepo(repo_url.into_string()))
                 } else {
-                    Err(human(format!("A URL was given with an unsupported scheme: {}",
-                                      repo_url.scheme())))
+                    Ok(TemplateType::LocalDir(String::from(repo_str)))
                 }
             } else {
                 Ok(TemplateType::LocalDir(String::from(repo_str)))
@@ -191,12 +193,13 @@ mod test {
     test_get_template_proto!(test_get_template_git, "git://foo.com/user/repo");
     test_get_template_proto!(test_get_template_file, "file://foo.com/user/repo");
     test_get_template_proto!(test_get_template_ssh, "ssh://user@foo.com/repo");
-    // ssh scp protocol (i.e. for private repos) isn't supported (yet).
-    //test_get_template_proto!(test_get_template_ssh, "git@foo.com:user/repo");
+    // SSH scp style repository access is not yet supported.
+    //test_get_template_proto!(test_get_template_ssh_scp_style, "git@foo.com:user/repo");
 
     #[test]
-    fn test_get_template_type_git_repo_bad_proto_is_err() {
-        assert!(get_template_type(Some("ftps://foo.com/user/repo"), None).is_err());
+    fn test_get_template_type_git_repo_bad_proto_is_localdir() {
+        assert_eq!(get_template_type(Some("ftps://foo.com/user/repo"), None).unwrap(),
+                   TemplateType::LocalDir("ftps://foo.com/user/repo".to_owned()));
     }
 
     #[test]
@@ -207,6 +210,15 @@ mod test {
                    TemplateType::LocalDir("/foo/user/repo".to_owned()));
         assert_eq!(get_template_type(Some("/foo/user/repo"), None).unwrap(),
                    TemplateType::LocalDir("/foo/user/repo".to_owned()));
+    }
+
+    // Windows paths can be parsed as URLs so make sure they are parsed as local directories.
+    #[test]
+    fn test_get_template_type_windows_path_is_localdir() {
+        assert_eq!(get_template_type(Some(r#"C:\foo\user\repo"#), None).unwrap(),
+                   TemplateType::LocalDir(r#"C:\foo\user\repo"#.to_owned()));
+        assert_eq!(get_template_type(Some(r#"C:/foo/user/repo"#), None).unwrap(),
+                   TemplateType::LocalDir(r#"C:/foo/user/repo"#.to_owned()));
     }
 
     #[test]
